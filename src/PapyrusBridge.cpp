@@ -51,6 +51,27 @@ namespace CampfireTogether::PapyrusBridge
                 isTent);
         }
 
+        bool IsRemoteCampObject(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            return CampfireSync::GetSingleton().IsRemoteCampObject(reference);
+        }
+
+        void ReportRemoteBuildSuppressed(RE::StaticFunctionTag*, RE::Actor* caster)
+        {
+            SKSE::log::info("CFT REMOTE BUILD CAMPFIRE suppressed caster={:08X}", caster ? caster->GetFormID() : 0);
+        }
+
+        void ReportRemoteBedrollAccess(
+            RE::StaticFunctionTag*,
+            RE::TESObjectREFR* bedroll,
+            RE::TESObjectREFR* tent)
+        {
+            SKSE::log::info(
+                "CFT REMOTE BEDROLL ACCESS bedroll={:08X} tent={:08X}",
+                bedroll ? bedroll->GetFormID() : 0,
+                tent ? tent->GetFormID() : 0);
+        }
+
         void BridgeReady(RE::StaticFunctionTag*)
         {
             SKSE::log::info("CFT PAPYRUS Campfire event listener READY");
@@ -65,6 +86,9 @@ namespace CampfireTogether::PapyrusBridge
 
         vm->RegisterFunction("ReportPlaced", "CampfireTogetherNative", ReportPlaced);
         vm->RegisterFunction("ReportRemoved", "CampfireTogetherNative", ReportRemoved);
+        vm->RegisterFunction("IsRemoteCampObject", "CampfireTogetherNative", IsRemoteCampObject);
+        vm->RegisterFunction("ReportRemoteBuildSuppressed", "CampfireTogetherNative", ReportRemoteBuildSuppressed);
+        vm->RegisterFunction("ReportRemoteBedrollAccess", "CampfireTogetherNative", ReportRemoteBedrollAccess);
         vm->RegisterFunction("BridgeReady", "CampfireTogetherNative", BridgeReady);
 
         SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative");
