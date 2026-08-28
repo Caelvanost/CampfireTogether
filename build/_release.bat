@@ -15,8 +15,9 @@ set "ZIP=%PROJECT%\build\CampfireTogether-v%VERSION%.zip"
 set "COMPILER=%SKYRIM_PATH%\Papyrus Compiler\PapyrusCompiler.exe"
 set "FLAGS=%SKYRIM_PATH%\Data\Source\Scripts\TESV_Papyrus_Flags.flg"
 set "VANILLA_SOURCE=%SKYRIM_PATH%\Data\Source\Scripts"
+set "SPRIGGIT_SOURCE=%PROJECT%\plugin\CampfireTogether"
 
- echo.
+echo.
 echo # Campfire Together v%VERSION% - Release Build
 echo.
 echo Using vcpkg: %VCPKG_ROOT%
@@ -35,12 +36,12 @@ if exist "%ZIP%" del /q "%ZIP%"
 mkdir "%OUT%" >nul 2>&1
 mkdir "%PACKAGE%" >nul 2>&1
 
-echo [1/4] Configuring...
+echo [1/5] Configuring...
 cmake -S "%PROJECT%" -B "%OUT%" -G "Visual Studio 18 2026" -A x64 -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
 if errorlevel 1 exit /b 1
 
 echo.
-echo [2/4] Building DLL...
+echo [2/5] Building DLL...
 cmake --build "%OUT%" --config Release
 if errorlevel 1 exit /b 1
 
@@ -51,8 +52,13 @@ if not exist "%PACKAGE%\SKSE\Plugins\CampfireTogether.dll" (
     )
 )
 
+if not exist "%PACKAGE%\SKSE\Plugins\CampfireTogether.dll" (
+    echo ERROR: CampfireTogether.dll was not produced.
+    exit /b 1
+)
+
 echo.
-echo [3/4] Compiling Papyrus bridge...
+echo [3/5] Compiling Papyrus scripts...
 if not exist "%COMPILER%" (
     echo ERROR: PapyrusCompiler.exe not found: %COMPILER%
     exit /b 1
@@ -68,22 +74,58 @@ if errorlevel 1 exit /b 1
 "%COMPILER%" "%PROJECT%\Scripts\Source\CampfireTogetherBridge.psc" -f="%FLAGS%" -i="%PROJECT%\Scripts\Source;%VANILLA_SOURCE%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
 
-if exist "%PROJECT%\plugin\CampfireTogether.esp" (
-    copy /y "%PROJECT%\plugin\CampfireTogether.esp" "%PACKAGE%\CampfireTogether.esp" >nul
-) else (
-    echo.
-    echo WARNING: plugin\CampfireTogether.esp is missing.
-    echo The DLL and PEX files built successfully, but the Campfire event listener quest cannot start without the ESPFE.
-    echo See docs\PLUGIN_SETUP.md.
+if not exist "%PACKAGE%\Scripts\CampfireTogetherNative.pex" (
+    echo ERROR: CampfireTogetherNative.pex was not produced.
+    exit /b 1
+)
+if not exist "%PACKAGE%\Scripts\CampfireTogetherBridge.pex" (
+    echo ERROR: CampfireTogetherBridge.pex was not produced.
+    exit /b 1
 )
 
 echo.
-echo [4/4] Packaging...
+echo [4/5] Building ESPFE with Spriggit...
+where dotnet >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: dotnet SDK was not found in PATH.
+    echo Spriggit 0.40.1 requires the .NET 9 SDK or newer.
+    exit /b 1
+)
+if not exist "%SPRIGGIT_SOURCE%\spriggit-meta.json" (
+    echo ERROR: Spriggit metadata not found: %SPRIGGIT_SOURCE%\spriggit-meta.json
+    exit /b 1
+)
+
+pushd "%PROJECT%"
+dotnet tool restore
+if errorlevel 1 (
+    popd
+    exit /b 1
+)
+
+dotnet tool run spriggit deserialize --InputPath "%SPRIGGIT_SOURCE%" --OutputPath "%PACKAGE%\CampfireTogether.esp"
+if errorlevel 1 (
+    popd
+    exit /b 1
+)
+popd
+
+if not exist "%PACKAGE%\CampfireTogether.esp" (
+    echo ERROR: Spriggit did not produce CampfireTogether.esp.
+    exit /b 1
+)
+
+echo.
+echo [5/5] Packaging...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path '%PACKAGE%\*' -DestinationPath '%ZIP%' -Force"
 if errorlevel 1 exit /b 1
 
 echo.
 echo Build complete:
-echo   %ZIP%
+echo   DLL: %PACKAGE%\SKSE\Plugins\CampfireTogether.dll
+echo   PEX: %PACKAGE%\Scripts\CampfireTogetherNative.pex
+echo   PEX: %PACKAGE%\Scripts\CampfireTogetherBridge.pex
+echo   ESP: %PACKAGE%\CampfireTogether.esp
+echo   ZIP: %ZIP%
 echo.
 endlocal
