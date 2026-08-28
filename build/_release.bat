@@ -15,6 +15,10 @@ set "ZIP=%PROJECT%\build\CampfireTogether-v%VERSION%.zip"
 set "COMPILER=%SKYRIM_PATH%\Papyrus Compiler\PapyrusCompiler.exe"
 set "FLAGS=%SKYRIM_PATH%\Data\Source\Scripts\TESV_Papyrus_Flags.flg"
 set "VANILLA_SOURCE=%SKYRIM_PATH%\Data\Source\Scripts"
+set "CFT_SOURCE=%PROJECT%\Scripts\Source"
+set "OVERRIDE_SOURCE=%PROJECT%\Scripts\Overrides"
+set "COMPILE_STUBS=%PROJECT%\Scripts\CompileStubs"
+set "PAPYRUS_IMPORTS=%CFT_SOURCE%;%COMPILE_STUBS%;%VANILLA_SOURCE%"
 set "SPRIGGIT_SOURCE=%PROJECT%\plugin\CampfireTogether"
 
 echo.
@@ -69,9 +73,13 @@ if not exist "%FLAGS%" (
 )
 mkdir "%PACKAGE%\Scripts" >nul 2>&1
 
-"%COMPILER%" "%PROJECT%\Scripts\Source\CampfireTogetherNative.psc" -f="%FLAGS%" -i="%PROJECT%\Scripts\Source;%VANILLA_SOURCE%" -o="%PACKAGE%\Scripts"
+"%COMPILER%" "%CFT_SOURCE%\CampfireTogetherNative.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
-"%COMPILER%" "%PROJECT%\Scripts\Source\CampfireTogetherBridge.psc" -f="%FLAGS%" -i="%PROJECT%\Scripts\Source;%VANILLA_SOURCE%" -o="%PACKAGE%\Scripts"
+"%COMPILER%" "%CFT_SOURCE%\CampfireTogetherBridge.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+if errorlevel 1 exit /b 1
+"%COMPILER%" "%OVERRIDE_SOURCE%\CampConjureObjectEffect.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+if errorlevel 1 exit /b 1
+"%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_CampTentNPCBedrollScript.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
 
 if not exist "%PACKAGE%\Scripts\CampfireTogetherNative.pex" (
@@ -80,6 +88,14 @@ if not exist "%PACKAGE%\Scripts\CampfireTogetherNative.pex" (
 )
 if not exist "%PACKAGE%\Scripts\CampfireTogetherBridge.pex" (
     echo ERROR: CampfireTogetherBridge.pex was not produced.
+    exit /b 1
+)
+if not exist "%PACKAGE%\Scripts\CampConjureObjectEffect.pex" (
+    echo ERROR: CampConjureObjectEffect.pex was not produced.
+    exit /b 1
+)
+if not exist "%PACKAGE%\Scripts\_Camp_CampTentNPCBedrollScript.pex" (
+    echo ERROR: _Camp_CampTentNPCBedrollScript.pex was not produced.
     exit /b 1
 )
 
@@ -125,6 +141,8 @@ echo Build complete:
 echo   DLL: %PACKAGE%\SKSE\Plugins\CampfireTogether.dll
 echo   PEX: %PACKAGE%\Scripts\CampfireTogetherNative.pex
 echo   PEX: %PACKAGE%\Scripts\CampfireTogetherBridge.pex
+echo   PEX: %PACKAGE%\Scripts\CampConjureObjectEffect.pex
+echo   PEX: %PACKAGE%\Scripts\_Camp_CampTentNPCBedrollScript.pex
 echo   ESP: %PACKAGE%\CampfireTogether.esp
 echo   ZIP: %ZIP%
 echo.
