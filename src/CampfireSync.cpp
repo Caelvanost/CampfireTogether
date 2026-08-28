@@ -8,7 +8,9 @@ namespace CampfireTogether
     namespace
     {
         constexpr std::size_t kMaxLocalHistory = 256;
+        constexpr std::size_t kMaxSuppressedRemovals = 64;
         constexpr float kRemovalMatchRadius = 64.0f;
+        constexpr auto kRemovalSuppressionLifetime = std::chrono::seconds(5);
 
         Protocol::Packet MakePacket(
             Protocol::PacketType type,
@@ -84,7 +86,7 @@ namespace CampfireTogether
 
         SKSE::log::info("CFT LOCAL PLACE ref={:08X} base={:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f}) rot=({:.2f},{:.2f},{:.2f})", placedRef->GetFormID(), baseFormID, eventID, isTent ? 1 : 0, positionX, positionY, positionZ, angleX, angleY, angleZ);
 
-        STRPMClient::GetSingleton().Send(MakePacket(
+        (void)STRPMClient::GetSingleton().Send(MakePacket(
             Protocol::PacketType::kPlace,
             eventID,
             baseFormID,
@@ -123,6 +125,62 @@ namespace CampfireTogether
         return eventID;
     }
 
+    bool CampfireSync::ConsumeSuppressedRemoval(RE::FormID baseFormID, float x, float y, float z, bool isTent)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        std::scoped_lock lock(_mutex);
+
+        for (auto it = _suppressedRemovals.begin(); it != _suppressedRemovals.end();) {
+            if (it->expiresAt <= now) {
+                it = _suppressedRemovals.erase(it);
+                continue;
+            }
+
+            if (it->baseFormID == baseFormID &&
+                it->isTent == isTent &&
+                DistanceSquared(it->x, it->y, it->z, x, y, z) <= kRemovalMatchRadius * kRemovalMatchRadius) {
+                _suppressedRemovals.erase(it);
+                return true;
+            }
+
+            ++it;
+        }
+
+        return false;
+    }
+
+    void CampfireSync::MarkSuppressedRemoval(const RemoteMirror& mirror)
+    {
+        float x = mirror.x;
+        float y = mirror.y;
+        float z = mirror.z;
+        if (auto ref = mirror.handle.get()) {
+            const auto& position = ref->data.location;
+            x = position.x;
+            y = position.y;
+            z = position.z;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        std::scoped_lock lock(_mutex);
+
+        while (!_suppressedRemovals.empty() && _suppressedRemovals.front().expiresAt <= now) {
+            _suppressedRemovals.pop_front();
+        }
+        while (_suppressedRemovals.size() >= kMaxSuppressedRemovals) {
+            _suppressedRemovals.pop_front();
+        }
+
+        _suppressedRemovals.push_back({
+            mirror.baseFormID,
+            x,
+            y,
+            z,
+            mirror.isTent,
+            now + kRemovalSuppressionLifetime
+        });
+    }
+
     void CampfireSync::OnLocalRemoved(
         RE::TESForm* baseForm,
         float positionX,
@@ -138,11 +196,16 @@ namespace CampfireTogether
         }
 
         const auto baseFormID = baseForm->GetFormID();
+        if (ConsumeSuppressedRemoval(baseFormID, positionX, positionY, positionZ, isTent)) {
+            SKSE::log::info("CFT LOCAL REMOVE suppressed remote teardown base={:08X} tent={} pos=({:.2f},{:.2f},{:.2f})", baseFormID, isTent ? 1 : 0, positionX, positionY, positionZ);
+            return;
+        }
+
         const auto eventID = MatchLocalRemoval(baseFormID, positionX, positionY, positionZ, isTent);
 
         SKSE::log::info("CFT LOCAL REMOVE base={:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f})", baseFormID, eventID, isTent ? 1 : 0, positionX, positionY, positionZ);
 
-        STRPMClient::GetSingleton().Send(MakePacket(
+        (void)STRPMClient::GetSingleton().Send(MakePacket(
             Protocol::PacketType::kRemove,
             eventID,
             baseFormID,
@@ -210,10 +273,53 @@ namespace CampfireTogether
         const auto handle = mirror->CreateRefHandle();
         if (packet.eventID != 0) {
             std::scoped_lock lock(_mutex);
-            _remoteMirrors.emplace(key, handle);
+            _remoteMirrors.emplace(key, RemoteMirror{
+                handle,
+                packet.baseFormID,
+                packet.positionX,
+                packet.positionY,
+                packet.positionZ,
+                (packet.flags & Protocol::kTent) != 0
+            });
         }
 
         SKSE::log::info("CFT REMOTE PLACE created connection={} event={} mirror={:08X} base={:08X} tent={} pos=({:.2f},{:.2f},{:.2f})", sender, packet.eventID, mirror->GetFormID(), packet.baseFormID, (packet.flags & Protocol::kTent) ? 1 : 0, packet.positionX, packet.positionY, packet.positionZ);
+    }
+
+    bool CampfireSync::DispatchTakeDown(RE::ObjectRefHandle handle, const char* scriptName)
+    {
+        auto reference = handle.get();
+        if (!reference || !scriptName || scriptName[0] == '\0') {
+            return false;
+        }
+
+        auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+        if (!vm) {
+            SKSE::log::warn("CFT REMOTE TEARDOWN failed: Papyrus VM unavailable");
+            return false;
+        }
+
+        auto* policy = vm->GetObjectHandlePolicy();
+        if (!policy) {
+            SKSE::log::warn("CFT REMOTE TEARDOWN failed: object handle policy unavailable");
+            return false;
+        }
+
+        const auto vmHandle = policy->GetHandleForObject(RE::TESObjectREFR::FORMTYPE, reference.get());
+        if (vmHandle == policy->EmptyHandle()) {
+            SKSE::log::warn("CFT REMOTE TEARDOWN failed: no VM handle ref={:08X} script={}", reference->GetFormID(), scriptName);
+            return false;
+        }
+
+        auto* args = RE::MakeFunctionArguments();
+        RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+        if (!vm->DispatchMethodCall(vmHandle, scriptName, "TakeDown", args, callback)) {
+            delete args;
+            SKSE::log::warn("CFT REMOTE TEARDOWN dispatch failed ref={:08X} script={}", reference->GetFormID(), scriptName);
+            return false;
+        }
+
+        return true;
     }
 
     void CampfireSync::DeleteMirror(RE::ObjectRefHandle handle)
@@ -226,9 +332,32 @@ namespace CampfireTogether
         mirror->SetDelete(true);
     }
 
+    void CampfireSync::TeardownMirror(const RemoteMirror& mirror)
+    {
+        auto reference = mirror.handle.get();
+        if (!reference) {
+            return;
+        }
+
+        MarkSuppressedRemoval(mirror);
+
+        const char* scriptName = mirror.isTent ? "CampTent" : "CampCampfire";
+        if (DispatchTakeDown(mirror.handle, scriptName)) {
+            if (mirror.isTent) {
+                SKSE::log::info("CFT REMOTE TENT TEARDOWN dispatched ref={:08X} base={:08X}", reference->GetFormID(), mirror.baseFormID);
+            } else {
+                SKSE::log::info("CFT REMOTE CAMPFIRE TEARDOWN dispatched ref={:08X} base={:08X}", reference->GetFormID(), mirror.baseFormID);
+            }
+            return;
+        }
+
+        DeleteMirror(mirror.handle);
+        SKSE::log::info("CFT REMOTE GENERIC TEARDOWN fallback ref={:08X} base={:08X} tent={}", reference->GetFormID(), mirror.baseFormID, mirror.isTent ? 1 : 0);
+    }
+
     void CampfireSync::RemoveRemote(STRPM::ConnectionID sender, const Protocol::Packet& packet)
     {
-        RE::ObjectRefHandle handle{};
+        RemoteMirror remote{};
         bool found = false;
 
         {
@@ -236,7 +365,7 @@ namespace CampfireTogether
             if (packet.eventID != 0) {
                 const RemoteKey key{ sender, packet.eventID };
                 if (const auto it = _remoteMirrors.find(key); it != _remoteMirrors.end()) {
-                    handle = it->second;
+                    remote = it->second;
                     _remoteMirrors.erase(it);
                     found = true;
                 }
@@ -247,13 +376,13 @@ namespace CampfireTogether
                     if (it->first.sender != sender) {
                         continue;
                     }
-                    auto ref = it->second.get();
+                    auto ref = it->second.handle.get();
                     if (!ref || !ref->GetBaseObject() || ref->GetBaseObject()->GetFormID() != packet.baseFormID) {
                         continue;
                     }
                     const auto& p = ref->data.location;
                     if (DistanceSquared(p.x, p.y, p.z, packet.positionX, packet.positionY, packet.positionZ) <= kRemovalMatchRadius * kRemovalMatchRadius) {
-                        handle = it->second;
+                        remote = it->second;
                         _remoteMirrors.erase(it);
                         found = true;
                         break;
@@ -267,24 +396,42 @@ namespace CampfireTogether
             return;
         }
 
-        DeleteMirror(handle);
-        SKSE::log::info("CFT REMOTE REMOVE deleted connection={} event={} base={:08X}", sender, packet.eventID, packet.baseFormID);
+        TeardownMirror(remote);
+        SKSE::log::info("CFT REMOTE REMOVE handled connection={} event={} base={:08X}", sender, packet.eventID, packet.baseFormID);
+    }
+
+    bool CampfireSync::IsRemoteCampObject(RE::TESObjectREFR* reference) const
+    {
+        if (!reference) {
+            return false;
+        }
+
+        const auto formID = reference->GetFormID();
+        std::scoped_lock lock(_mutex);
+        for (const auto& [key, mirror] : _remoteMirrors) {
+            auto remoteRef = mirror.handle.get();
+            if (remoteRef && remoteRef->GetFormID() == formID) {
+                return true;
+            }
+        }
+        return false;
     }
 
     void CampfireSync::Reset()
     {
-        std::deque<RE::ObjectRefHandle> mirrors;
+        std::deque<RemoteMirror> mirrors;
         {
             std::scoped_lock lock(_mutex);
-            for (const auto& [key, handle] : _remoteMirrors) {
-                mirrors.push_back(handle);
+            for (const auto& [key, mirror] : _remoteMirrors) {
+                mirrors.push_back(mirror);
             }
             _remoteMirrors.clear();
             _localPlacements.clear();
+            _suppressedRemovals.clear();
         }
 
-        for (const auto& handle : mirrors) {
-            DeleteMirror(handle);
+        for (const auto& mirror : mirrors) {
+            TeardownMirror(mirror);
         }
         SKSE::log::info("CFT state reset mirrors={}", mirrors.size());
     }
