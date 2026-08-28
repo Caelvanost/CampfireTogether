@@ -1,0 +1,18 @@
+SpriggitSource:
+  PackageName: Spriggit.YAML.Skyrim
+  Version: 0.40.1
+ModKey: CampfireTogether.esp
+GameRelease: SkyrimSE
+ModHeader:
+  Flags:
+  - LightMaster
+  Stats:
+    Version: 1.7
+    NumRecords: 1
+    NextFormID: 2049
+  Author: Caelvanost
+  Description: Campfire Together bridge plugin
+  MasterReferences:
+  - Master: Skyrim.esm
+    FileSize: 0
+  INTV: 1
