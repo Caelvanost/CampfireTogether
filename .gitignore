@@ -5,11 +5,6 @@
 /dist/
 /out/
 
-# Local plugin binary created with CK/xEdit
-/plugin/*.esp
-/plugin/*.esm
-/plugin/*.esl
-
 # Visual Studio
 .vs/
 *.user
