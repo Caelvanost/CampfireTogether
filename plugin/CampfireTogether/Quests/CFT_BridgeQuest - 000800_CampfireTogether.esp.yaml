@@ -1,0 +1,14 @@
+FormKey: 000800:CampfireTogether.esp
+EditorID: CFT_BridgeQuest
+VirtualMachineAdapter:
+  Scripts:
+  - Name: CampfireTogetherBridge
+    FileName: ''
+Name:
+  TargetLanguage: English
+  Value: Campfire Together Bridge
+Flags:
+- StartGameEnabled
+Type: SideQuest
+NextAliasID: 0
+Aliases: []
