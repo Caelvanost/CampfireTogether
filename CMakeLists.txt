@@ -24,6 +24,19 @@ add_commonlibsse_plugin(${PROJECT_NAME}
         src/STRPMClient.cpp
 )
 
+# CommonLibSSE-NG 3.5.3 generates a metadata translation unit that uses the
+# std::string_view literal suffix ("sv") without importing std::literals.
+# MSVC 18 rejects that generated source, so make the generated TU self-contained.
+set(CFT_COMMONLIB_PLUGIN_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/__${PROJECT_NAME}Plugin.cpp")
+if(EXISTS "${CFT_COMMONLIB_PLUGIN_SOURCE}")
+    file(READ "${CFT_COMMONLIB_PLUGIN_SOURCE}" CFT_COMMONLIB_PLUGIN_CONTENT)
+    file(WRITE "${CFT_COMMONLIB_PLUGIN_SOURCE}"
+        "#include <string_view>\n"
+        "using namespace std::literals;\n"
+        "${CFT_COMMONLIB_PLUGIN_CONTENT}"
+    )
+endif()
+
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
