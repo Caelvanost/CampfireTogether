@@ -305,15 +305,21 @@ namespace CampfireTogether
             return false;
         }
 
-        const auto vmHandle = policy->GetHandleForObject(RE::TESObjectREFR::FORMTYPE, reference.get());
+        const auto vmHandle = policy->GetHandleForObject(reference->GetFormType(), reference.get());
         if (vmHandle == policy->EmptyHandle()) {
             SKSE::log::warn("CFT REMOTE TEARDOWN failed: no VM handle ref={:08X} script={}", reference->GetFormID(), scriptName);
             return false;
         }
 
+        RE::BSTSmartPointer<RE::BSScript::Object> scriptObject;
+        if (!vm->FindBoundObject(vmHandle, scriptName, scriptObject) || !scriptObject) {
+            SKSE::log::warn("CFT REMOTE TEARDOWN script not bound ref={:08X} script={}", reference->GetFormID(), scriptName);
+            return false;
+        }
+
         auto* args = RE::MakeFunctionArguments();
         RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
-        if (!vm->DispatchMethodCall(vmHandle, scriptName, "TakeDown", args, callback)) {
+        if (!vm->DispatchMethodCall(scriptObject, "TakeDown", args, callback)) {
             delete args;
             SKSE::log::warn("CFT REMOTE TEARDOWN dispatch failed ref={:08X} script={}", reference->GetFormID(), scriptName);
             return false;
@@ -408,7 +414,8 @@ namespace CampfireTogether
 
         const auto formID = reference->GetFormID();
         std::scoped_lock lock(_mutex);
-        for (const auto& [key, mirror] : _remoteMirrors) {
+        for (const auto& entry : _remoteMirrors) {
+            const auto& mirror = entry.second;
             auto remoteRef = mirror.handle.get();
             if (remoteRef && remoteRef->GetFormID() == formID) {
                 return true;
@@ -422,8 +429,8 @@ namespace CampfireTogether
         std::deque<RemoteMirror> mirrors;
         {
             std::scoped_lock lock(_mutex);
-            for (const auto& [key, mirror] : _remoteMirrors) {
-                mirrors.push_back(mirror);
+            for (const auto& entry : _remoteMirrors) {
+                mirrors.push_back(entry.second);
             }
             _remoteMirrors.clear();
             _localPlacements.clear();
