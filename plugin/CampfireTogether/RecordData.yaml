@@ -5,7 +5,7 @@ ModKey: CampfireTogether.esp
 GameRelease: SkyrimSE
 ModHeader:
   Flags:
-  - LightMaster
+  - Small
   Stats:
     Version: 1.7
     NumRecords: 1
