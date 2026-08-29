@@ -79,11 +79,23 @@ namespace CampfireTogether
             STRPM::kMessageReliable | STRPM::kMessageOrdered);
 
         if (result != STRPM::Result::kOk) {
-            SKSE::log::warn("CFT STRPM TX failed result={} type={} event={} base={:08X}", STRPM::ResultToString(result), static_cast<unsigned>(packet.type), packet.eventID, packet.baseFormID);
+            SKSE::log::warn(
+                "CFT STRPM TX failed result={} type={} event={} base={}:{:08X}",
+                STRPM::ResultToString(result),
+                static_cast<unsigned>(packet.type),
+                packet.eventID,
+                packet.basePluginName,
+                packet.baseLocalFormID);
             return false;
         }
 
-        SKSE::log::info("CFT STRPM TX type={} event={} base={:08X} tent={}", static_cast<unsigned>(packet.type), packet.eventID, packet.baseFormID, (packet.flags & Protocol::kTent) ? 1 : 0);
+        SKSE::log::info(
+            "CFT STRPM TX type={} event={} base={}:{:08X} tent={}",
+            static_cast<unsigned>(packet.type),
+            packet.eventID,
+            packet.basePluginName,
+            packet.baseLocalFormID,
+            (packet.flags & Protocol::kTent) ? 1 : 0);
         return true;
     }
 
@@ -122,7 +134,13 @@ namespace CampfireTogether
         }
 
         const auto connectionID = message.sender.connectionID;
-        SKSE::log::info("CFT STRPM RX connection={} type={} event={} base={:08X}", connectionID, static_cast<unsigned>(packet.type), packet.eventID, packet.baseFormID);
+        SKSE::log::info(
+            "CFT STRPM RX connection={} type={} event={} base={}:{:08X}",
+            connectionID,
+            static_cast<unsigned>(packet.type),
+            packet.eventID,
+            packet.basePluginName,
+            packet.baseLocalFormID);
 
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([connectionID, packet]() {

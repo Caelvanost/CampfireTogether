@@ -6,7 +6,8 @@
 namespace CampfireTogether::Protocol
 {
     inline constexpr std::uint32_t kMagic = 0x31544643;  // "CFT1"
-    inline constexpr std::uint16_t kVersion = 1;
+    inline constexpr std::uint16_t kVersion = 2;
+    inline constexpr std::uint32_t kPluginNameCapacity = 260;
 
     enum class PacketType : std::uint8_t
     {
@@ -28,7 +29,8 @@ namespace CampfireTogether::Protocol
         PacketType type{ PacketType::kPlace };
         std::uint8_t flags{ kNone };
         std::uint64_t eventID{ 0 };
-        std::uint32_t baseFormID{ 0 };
+        std::uint32_t baseLocalFormID{ 0 };
+        char basePluginName[kPluginNameCapacity]{};
         float positionX{ 0.0f };
         float positionY{ 0.0f };
         float positionZ{ 0.0f };
@@ -38,7 +40,7 @@ namespace CampfireTogether::Protocol
     };
 #pragma pack(pop)
 
-    static_assert(sizeof(Packet) == 44);
+    static_assert(sizeof(Packet) == 304);
     static_assert(std::is_trivially_copyable_v<Packet>);
 
     [[nodiscard]] inline bool IsValid(const Packet& packet) noexcept
@@ -47,6 +49,8 @@ namespace CampfireTogether::Protocol
                packet.version == kVersion &&
                (packet.type == PacketType::kPlace ||
                 packet.type == PacketType::kRemove) &&
-               packet.baseFormID != 0;
+               packet.baseLocalFormID != 0 &&
+               packet.basePluginName[0] != '\0' &&
+               packet.basePluginName[kPluginNameCapacity - 1] == '\0';
     }
 }

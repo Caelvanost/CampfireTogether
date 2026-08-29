@@ -12,10 +12,40 @@ namespace CampfireTogether
         constexpr float kRemovalMatchRadius = 64.0f;
         constexpr auto kRemovalSuppressionLifetime = std::chrono::seconds(5);
 
+        struct FormIdentity
+        {
+            std::string pluginName;
+            RE::FormID localFormID{ 0 };
+        };
+
+        [[nodiscard]] std::optional<FormIdentity> DescribeForm(RE::TESForm* form)
+        {
+            if (!form || form->GetFormID() == 0) {
+                return std::nullopt;
+            }
+
+            auto* ownerFile = form->GetFile(0);
+            if (!ownerFile || !ownerFile->fileName[0]) {
+                return std::nullopt;
+            }
+
+            const auto pluginNameLength = std::strlen(ownerFile->fileName);
+            if (pluginNameLength >= Protocol::kPluginNameCapacity) {
+                return std::nullopt;
+            }
+
+            const auto localFormID = form->GetLocalFormID();
+            if (localFormID == 0) {
+                return std::nullopt;
+            }
+
+            return FormIdentity{ ownerFile->fileName, localFormID };
+        }
+
         Protocol::Packet MakePacket(
             Protocol::PacketType type,
             std::uint64_t eventID,
-            RE::FormID baseFormID,
+            const FormIdentity& baseIdentity,
             float px,
             float py,
             float pz,
@@ -27,7 +57,11 @@ namespace CampfireTogether
             Protocol::Packet packet{};
             packet.type = type;
             packet.eventID = eventID;
-            packet.baseFormID = baseFormID;
+            packet.baseLocalFormID = baseIdentity.localFormID;
+            std::memcpy(
+                packet.basePluginName,
+                baseIdentity.pluginName.c_str(),
+                baseIdentity.pluginName.size() + 1);
             packet.flags = isTent ? Protocol::kTent : Protocol::kNone;
             packet.positionX = px;
             packet.positionY = py;
@@ -36,6 +70,19 @@ namespace CampfireTogether
             packet.angleY = ay;
             packet.angleZ = az;
             return packet;
+        }
+
+        [[nodiscard]] RE::TESBoundObject* ResolvePacketBase(const Protocol::Packet& packet)
+        {
+            auto* dataHandler = RE::TESDataHandler::GetSingleton();
+            if (!dataHandler) {
+                return nullptr;
+            }
+
+            auto* form = dataHandler->LookupForm(
+                packet.baseLocalFormID,
+                std::string_view(packet.basePluginName));
+            return form ? form->As<RE::TESBoundObject>() : nullptr;
         }
 
         float DistanceSquared(float ax, float ay, float az, float bx, float by, float bz)
@@ -73,6 +120,15 @@ namespace CampfireTogether
             return;
         }
 
+        const auto baseIdentity = DescribeForm(base);
+        if (!baseIdentity) {
+            SKSE::log::warn(
+                "CFT LOCAL PLACE ignored: base identity unavailable ref={:08X} runtimeBase={:08X}",
+                placedRef->GetFormID(),
+                base->GetFormID());
+            return;
+        }
+
         const auto eventID = _nextEventID.fetch_add(1);
         const auto baseFormID = base->GetFormID();
 
@@ -84,12 +140,25 @@ namespace CampfireTogether
             }
         }
 
-        SKSE::log::info("CFT LOCAL PLACE ref={:08X} base={:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f}) rot=({:.2f},{:.2f},{:.2f})", placedRef->GetFormID(), baseFormID, eventID, isTent ? 1 : 0, positionX, positionY, positionZ, angleX, angleY, angleZ);
+        SKSE::log::info(
+            "CFT LOCAL PLACE ref={:08X} base={}:{:08X} runtimeBase={:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f}) rot=({:.2f},{:.2f},{:.2f})",
+            placedRef->GetFormID(),
+            baseIdentity->pluginName,
+            baseIdentity->localFormID,
+            baseFormID,
+            eventID,
+            isTent ? 1 : 0,
+            positionX,
+            positionY,
+            positionZ,
+            angleX,
+            angleY,
+            angleZ);
 
         (void)STRPMClient::GetSingleton().Send(MakePacket(
             Protocol::PacketType::kPlace,
             eventID,
-            baseFormID,
+            *baseIdentity,
             positionX,
             positionY,
             positionZ,
@@ -197,18 +266,39 @@ namespace CampfireTogether
 
         const auto baseFormID = baseForm->GetFormID();
         if (ConsumeSuppressedRemoval(baseFormID, positionX, positionY, positionZ, isTent)) {
-            SKSE::log::info("CFT LOCAL REMOVE suppressed remote teardown base={:08X} tent={} pos=({:.2f},{:.2f},{:.2f})", baseFormID, isTent ? 1 : 0, positionX, positionY, positionZ);
+            SKSE::log::info(
+                "CFT LOCAL REMOVE suppressed remote teardown runtimeBase={:08X} tent={} pos=({:.2f},{:.2f},{:.2f})",
+                baseFormID,
+                isTent ? 1 : 0,
+                positionX,
+                positionY,
+                positionZ);
+            return;
+        }
+
+        const auto baseIdentity = DescribeForm(baseForm);
+        if (!baseIdentity) {
+            SKSE::log::warn("CFT LOCAL REMOVE ignored: base identity unavailable runtimeBase={:08X}", baseFormID);
             return;
         }
 
         const auto eventID = MatchLocalRemoval(baseFormID, positionX, positionY, positionZ, isTent);
 
-        SKSE::log::info("CFT LOCAL REMOVE base={:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f})", baseFormID, eventID, isTent ? 1 : 0, positionX, positionY, positionZ);
+        SKSE::log::info(
+            "CFT LOCAL REMOVE base={}:{:08X} runtimeBase={:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f})",
+            baseIdentity->pluginName,
+            baseIdentity->localFormID,
+            baseFormID,
+            eventID,
+            isTent ? 1 : 0,
+            positionX,
+            positionY,
+            positionZ);
 
         (void)STRPMClient::GetSingleton().Send(MakePacket(
             Protocol::PacketType::kRemove,
             eventID,
-            baseFormID,
+            *baseIdentity,
             positionX,
             positionY,
             positionZ,
@@ -250,15 +340,29 @@ namespace CampfireTogether
         }
 
         auto* anchor = RE::TESForm::LookupByID<RE::TESObjectREFR>(*proxyID);
-        auto* base = RE::TESForm::LookupByID<RE::TESBoundObject>(packet.baseFormID);
+        auto* base = ResolvePacketBase(packet);
         if (!anchor || !base) {
-            SKSE::log::warn("CFT REMOTE PLACE failed connection={} event={} proxy={:08X} base={:08X} anchor={} baseFound={}", sender, packet.eventID, *proxyID, packet.baseFormID, anchor ? 1 : 0, base ? 1 : 0);
+            SKSE::log::warn(
+                "CFT REMOTE PLACE failed connection={} event={} proxy={:08X} base={}:{:08X} anchor={} baseFound={}",
+                sender,
+                packet.eventID,
+                *proxyID,
+                packet.basePluginName,
+                packet.baseLocalFormID,
+                anchor ? 1 : 0,
+                base ? 1 : 0);
             return;
         }
 
         auto mirror = anchor->PlaceObjectAtMe(base, false);
         if (!mirror) {
-            SKSE::log::warn("CFT REMOTE PLACE PlaceObjectAtMe failed connection={} event={} base={:08X}", sender, packet.eventID, packet.baseFormID);
+            SKSE::log::warn(
+                "CFT REMOTE PLACE PlaceObjectAtMe failed connection={} event={} base={}:{:08X} runtimeBase={:08X}",
+                sender,
+                packet.eventID,
+                packet.basePluginName,
+                packet.baseLocalFormID,
+                base->GetFormID());
             return;
         }
 
@@ -275,7 +379,7 @@ namespace CampfireTogether
             std::scoped_lock lock(_mutex);
             _remoteMirrors.emplace(key, RemoteMirror{
                 handle,
-                packet.baseFormID,
+                base->GetFormID(),
                 packet.positionX,
                 packet.positionY,
                 packet.positionZ,
@@ -283,7 +387,18 @@ namespace CampfireTogether
             });
         }
 
-        SKSE::log::info("CFT REMOTE PLACE created connection={} event={} mirror={:08X} base={:08X} tent={} pos=({:.2f},{:.2f},{:.2f})", sender, packet.eventID, mirror->GetFormID(), packet.baseFormID, (packet.flags & Protocol::kTent) ? 1 : 0, packet.positionX, packet.positionY, packet.positionZ);
+        SKSE::log::info(
+            "CFT REMOTE PLACE created connection={} event={} mirror={:08X} base={}:{:08X} runtimeBase={:08X} tent={} pos=({:.2f},{:.2f},{:.2f})",
+            sender,
+            packet.eventID,
+            mirror->GetFormID(),
+            packet.basePluginName,
+            packet.baseLocalFormID,
+            base->GetFormID(),
+            (packet.flags & Protocol::kTent) ? 1 : 0,
+            packet.positionX,
+            packet.positionY,
+            packet.positionZ);
     }
 
     bool CampfireSync::DispatchTakeDown(RE::ObjectRefHandle handle, const char* scriptName)
@@ -350,21 +465,24 @@ namespace CampfireTogether
         const char* scriptName = mirror.isTent ? "CampTent" : "CampCampfire";
         if (DispatchTakeDown(mirror.handle, scriptName)) {
             if (mirror.isTent) {
-                SKSE::log::info("CFT REMOTE TENT TEARDOWN dispatched ref={:08X} base={:08X}", reference->GetFormID(), mirror.baseFormID);
+                SKSE::log::info("CFT REMOTE TENT TEARDOWN dispatched ref={:08X} runtimeBase={:08X}", reference->GetFormID(), mirror.baseFormID);
             } else {
-                SKSE::log::info("CFT REMOTE CAMPFIRE TEARDOWN dispatched ref={:08X} base={:08X}", reference->GetFormID(), mirror.baseFormID);
+                SKSE::log::info("CFT REMOTE CAMPFIRE TEARDOWN dispatched ref={:08X} runtimeBase={:08X}", reference->GetFormID(), mirror.baseFormID);
             }
             return;
         }
 
         DeleteMirror(mirror.handle);
-        SKSE::log::info("CFT REMOTE GENERIC TEARDOWN fallback ref={:08X} base={:08X} tent={}", reference->GetFormID(), mirror.baseFormID, mirror.isTent ? 1 : 0);
+        SKSE::log::info("CFT REMOTE GENERIC TEARDOWN fallback ref={:08X} runtimeBase={:08X} tent={}", reference->GetFormID(), mirror.baseFormID, mirror.isTent ? 1 : 0);
     }
 
     void CampfireSync::RemoveRemote(STRPM::ConnectionID sender, const Protocol::Packet& packet)
     {
         RemoteMirror remote{};
         bool found = false;
+
+        auto* expectedBase = ResolvePacketBase(packet);
+        const auto expectedBaseFormID = expectedBase ? expectedBase->GetFormID() : RE::FormID{ 0 };
 
         {
             std::scoped_lock lock(_mutex);
@@ -377,13 +495,13 @@ namespace CampfireTogether
                 }
             }
 
-            if (!found) {
+            if (!found && expectedBaseFormID != 0) {
                 for (auto it = _remoteMirrors.begin(); it != _remoteMirrors.end(); ++it) {
-                    if (it->first.sender != sender) {
+                    if (it->first.sender != sender || it->second.baseFormID != expectedBaseFormID) {
                         continue;
                     }
                     auto ref = it->second.handle.get();
-                    if (!ref || !ref->GetBaseObject() || ref->GetBaseObject()->GetFormID() != packet.baseFormID) {
+                    if (!ref) {
                         continue;
                     }
                     const auto& p = ref->data.location;
@@ -398,12 +516,24 @@ namespace CampfireTogether
         }
 
         if (!found) {
-            SKSE::log::warn("CFT REMOTE REMOVE no mirror match connection={} event={} base={:08X}", sender, packet.eventID, packet.baseFormID);
+            SKSE::log::warn(
+                "CFT REMOTE REMOVE no mirror match connection={} event={} base={}:{:08X} resolvedRuntimeBase={:08X}",
+                sender,
+                packet.eventID,
+                packet.basePluginName,
+                packet.baseLocalFormID,
+                expectedBaseFormID);
             return;
         }
 
         TeardownMirror(remote);
-        SKSE::log::info("CFT REMOTE REMOVE handled connection={} event={} base={:08X}", sender, packet.eventID, packet.baseFormID);
+        SKSE::log::info(
+            "CFT REMOTE REMOVE handled connection={} event={} base={}:{:08X} runtimeBase={:08X}",
+            sender,
+            packet.eventID,
+            packet.basePluginName,
+            packet.baseLocalFormID,
+            remote.baseFormID);
     }
 
     bool CampfireSync::IsRemoteCampObject(RE::TESObjectREFR* reference) const
