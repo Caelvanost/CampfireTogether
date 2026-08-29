@@ -1,8 +1,8 @@
-# CampfireTogether v0.1.1 test plan
+# CampfireTogether v0.1.2 test plan
 
 ## Scope
 
-v0.1.1 validates the full create/use/remove lifecycle for the first two important Campfire roots: campfires and tents.
+v0.1.2 validates the full create/use/remove lifecycle for the first two important Campfire roots: campfires and tents, plus the stricter local-input gate for the `Build Campfire` power.
 
 Still not covered:
 
@@ -15,7 +15,7 @@ Still not covered:
 
 ## Installation / file conflicts
 
-Install the same `CampfireTogether-v0.1.1.zip` on both machines.
+Install the same `CampfireTogether-v0.1.2.zip` on both machines.
 
 CampfireTogether intentionally overrides these two Campfire scripts and **must win their file conflicts**:
 
@@ -28,7 +28,8 @@ Do not let another mod overwrite these files during this test unless that compat
 
 On both machines, `Documents/My Games/Skyrim Special Edition/SKSE/CampfireTogether.log` should contain:
 
-- `Campfire Together v0.1.1 loading`
+- `Campfire Together v0.1.2 loading`
+- `CFT LOCAL BUILD INTENT input sink READY`
 - `CFT PAPYRUS native bridge READY`
 - `CFT STRPM READY`
 - `CFT PAPYRUS Campfire event listener READY`
@@ -40,12 +41,14 @@ If the last line is absent, the ESPFE quest/script bridge is not active.
 1. Connect Player1 and Player2 to the same Skyrim Together session and stand together outside.
 2. Player1 uses Campfire's `Build Campfire` power.
 3. Player1 should enter the normal Campfire placement flow.
-4. Player2 must **not** be asked to place a campfire.
-5. If STR replicated the magic effect, Player2's CampfireTogether log should contain `CFT REMOTE BUILD CAMPFIRE suppressed`.
-6. Finish placing the campfire on Player1.
-7. Player1 should log `CFT LOCAL PLACE` then `CFT STRPM TX`.
-8. Player2 should log `CFT STRPM RX` then `CFT REMOTE PLACE created`.
-9. Confirm the campfire root and its normal Campfire visuals appear on Player2.
+4. Player1 should log `CFT LOCAL BUILD INTENT armed` followed by `CFT LOCAL BUILD INTENT consumed`.
+5. Player2 must **not** be asked to place a campfire.
+6. If STR replicated the magic effect, Player2's CampfireTogether log should contain `CFT REMOTE BUILD CAMPFIRE suppressed`.
+7. Player2 should not log `CFT LOCAL BUILD INTENT armed` or `CFT LOCAL BUILD INTENT consumed` from Player1's remote cast.
+8. Finish placing the campfire on Player1.
+9. Player1 should log `CFT LOCAL PLACE` then `CFT STRPM TX`.
+10. Player2 should log `CFT STRPM RX` then `CFT REMOTE PLACE created`.
+11. Confirm the campfire root and its normal Campfire visuals appear on Player2.
 
 Repeat with Player2 as the builder.
 
@@ -89,6 +92,6 @@ Repeat Tests A through D with Player2 creating the campfire/tent and Player1 act
 
 ## Important
 
-v0.1.1 still sends runtime base FormIDs. Both machines must therefore use the same mod list and load order for the test. A plugin-name + local-FormID descriptor will replace this before a public release.
+v0.1.2 still sends runtime base FormIDs. Both machines must therefore use the same mod list and load order for the test. A plugin-name + local-FormID descriptor will replace this before a public release.
 
 Keep both `CampfireTogether.log` files after the test even if everything appears correct; the lifecycle logs are useful for verifying that remote teardown does not echo packets back and that the new script guards are being exercised.

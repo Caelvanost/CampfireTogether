@@ -15,13 +15,12 @@ Scroll property Setting_ScrollToReturn auto
 { DESCRIPTION: Optional: The scroll to return to the player if this effect fails. Used on Scroll effects. }
 
 Event OnEffectStart(Actor akTarget, Actor akCaster)
-	Actor localPlayer = Game.GetPlayer()
-	if (akCaster && akCaster != localPlayer) || (akTarget && akTarget != localPlayer)
-		Actor remoteActor = akCaster
-		if !remoteActor
-			remoteActor = akTarget
+	if !CampfireTogetherNative.ConsumeLocalBuildIntent()
+		Actor sourceActor = akCaster
+		if !sourceActor
+			sourceActor = akTarget
 		endif
-		CampfireTogetherNative.ReportRemoteBuildSuppressed(remoteActor)
+		CampfireTogetherNative.ReportRemoteBuildSuppressed(sourceActor)
 		return
 	endif
 

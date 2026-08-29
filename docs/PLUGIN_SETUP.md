@@ -21,11 +21,11 @@ The Skyrim plugin header uses Mutagen/Spriggit's `Small` flag (`0x00000200`), so
 
 The bridge quest contains no direct form references to Campfire, so the ESP does not technically need `Campfire.esm` as a master. Campfire remains a runtime requirement because it produces the ModEvents and provides the runtime scripts used by the compatibility layer.
 
-## Papyrus compatibility overrides in v0.1.1
+## Papyrus compatibility overrides in v0.1.2
 
-The placement/removal bridge still uses Campfire's public ModEvent API and does not replace the core placement system. v0.1.1 does, however, intentionally override two narrowly scoped Campfire scripts to handle STR-specific behavior that Campfire's public API does not expose:
+The placement/removal bridge still uses Campfire's public ModEvent API and does not replace the core placement system. v0.1.2 does, however, intentionally override two narrowly scoped Campfire scripts to handle STR-specific behavior that Campfire's public API does not expose:
 
-- `CampConjureObjectEffect.pex` prevents a remotely replicated Build Campfire magic effect from launching a second placement flow on the receiving player's machine;
+- `CampConjureObjectEffect.pex` prevents a remotely replicated Build Campfire magic effect from launching a second placement flow on the receiving player's machine by requiring a recent local Skyrim `Shout`/Power input intent from the DLL;
 - `_Camp_CampTentNPCBedrollScript.pex` permits the local player to use a follower/spare bedroll only when its parent tent is a remote root tracked by CampfireTogether.
 
 The source copies live under `Scripts/Overrides`. `Scripts/CompileStubs` contains only declarations needed to compile those overrides without copying the entire Campfire source tree into this repository. Compile stubs are never packaged.
@@ -55,7 +55,7 @@ If the expected Campfire script is not bound, CampfireTogether falls back to gen
 4. restore the repo-local Spriggit 0.40.1 .NET tool and deserialize the YAML source into `CampfireTogether.esp`;
 5. package DLL + four PEX + ESP into the release ZIP.
 
-Expected packaged scripts for v0.1.1:
+Expected packaged scripts for v0.1.2:
 
 - `CampfireTogetherNative.pex`
 - `CampfireTogetherBridge.pex`

@@ -2,6 +2,7 @@
 #include "PapyrusBridge.h"
 
 #include "CampfireSync.h"
+#include "LocalBuildIntent.h"
 
 namespace CampfireTogether::PapyrusBridge
 {
@@ -56,6 +57,11 @@ namespace CampfireTogether::PapyrusBridge
             return CampfireSync::GetSingleton().IsRemoteCampObject(reference);
         }
 
+        bool ConsumeLocalBuildIntent(RE::StaticFunctionTag*)
+        {
+            return LocalBuildIntent::Consume();
+        }
+
         void ReportRemoteBuildSuppressed(RE::StaticFunctionTag*, RE::Actor* caster)
         {
             SKSE::log::info("CFT REMOTE BUILD CAMPFIRE suppressed caster={:08X}", caster ? caster->GetFormID() : 0);
@@ -87,6 +93,7 @@ namespace CampfireTogether::PapyrusBridge
         vm->RegisterFunction("ReportPlaced", "CampfireTogetherNative", ReportPlaced);
         vm->RegisterFunction("ReportRemoved", "CampfireTogetherNative", ReportRemoved);
         vm->RegisterFunction("IsRemoteCampObject", "CampfireTogetherNative", IsRemoteCampObject);
+        vm->RegisterFunction("ConsumeLocalBuildIntent", "CampfireTogetherNative", ConsumeLocalBuildIntent);
         vm->RegisterFunction("ReportRemoteBuildSuppressed", "CampfireTogetherNative", ReportRemoteBuildSuppressed);
         vm->RegisterFunction("ReportRemoteBedrollAccess", "CampfireTogetherNative", ReportRemoteBedrollAccess);
         vm->RegisterFunction("BridgeReady", "CampfireTogetherNative", BridgeReady);

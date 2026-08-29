@@ -2,6 +2,7 @@
 
 #include "CampfireSync.h"
 #include "CampfireTogether/Version.h"
+#include "LocalBuildIntent.h"
 #include "PapyrusBridge.h"
 #include "STRPMClient.h"
 
@@ -29,7 +30,9 @@ namespace
         logger::info("CFT runtime init reason={} reset={}", reason, reset ? 1 : 0);
         if (reset) {
             CampfireTogether::CampfireSync::GetSingleton().Reset();
+            CampfireTogether::LocalBuildIntent::Reset();
         }
+        CampfireTogether::LocalBuildIntent::RegisterInputSink();
         CampfireTogether::STRPMClient::GetSingleton().Initialize();
     }
 
@@ -40,6 +43,9 @@ namespace
         }
 
         switch (message->type) {
+        case SKSE::MessagingInterface::kInputLoaded:
+            CampfireTogether::LocalBuildIntent::RegisterInputSink();
+            break;
         case SKSE::MessagingInterface::kDataLoaded:
             InitializeRuntime("data-loaded", false);
             break;
