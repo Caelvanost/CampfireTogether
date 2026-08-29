@@ -4,20 +4,28 @@ Scriptname CampUtil Hidden
 ; This file is never compiled or packaged.
 
 Bool Function LegalToCampHere(Bool abIgnoreSetting = False) Global
-	Return True
+    Return True
 EndFunction
 
 Bool Function IsCrimeToPlaceInTowns(Form akBaseObject) Global
-	Return False
+    Return False
 EndFunction
 
 Function SendEvent_OnObjectPlaced(ObjectReference akObjectReference) Global
 EndFunction
 
 Bool Function IsTrackedFollower(Actor akActor) Global
-	Return False
+    Return False
 EndFunction
 
 Bool Function IsRefInInterior(ObjectReference akReference) Global
-	Return False
+    Return False
+EndFunction
+
+Bool Function PlayerCanPlaceObjects(Bool abShowMessage = True, Bool abPlayerBusyCheck = True) Global
+    Return True
+EndFunction
+
+_Camp_Compatibility Function GetCompatibilitySystem() Global
+    Return None
 EndFunction

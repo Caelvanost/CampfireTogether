@@ -79,7 +79,7 @@ mkdir "%PACKAGE%\Scripts" >nul 2>&1
 if errorlevel 1 exit /b 1
 "%COMPILER%" "%CFT_SOURCE%\CampfireTogetherBridge.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
-"%COMPILER%" "%OVERRIDE_SOURCE%\CampConjureObjectEffect.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+"%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_SpawnCampfire.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
 "%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_CampTentNPCBedrollScript.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
@@ -92,8 +92,8 @@ if not exist "%PACKAGE%\Scripts\CampfireTogetherBridge.pex" (
     echo ERROR: CampfireTogetherBridge.pex was not produced.
     exit /b 1
 )
-if not exist "%PACKAGE%\Scripts\CampConjureObjectEffect.pex" (
-    echo ERROR: CampConjureObjectEffect.pex was not produced.
+if not exist "%PACKAGE%\Scripts\_Camp_SpawnCampfire.pex" (
+    echo ERROR: _Camp_SpawnCampfire.pex was not produced.
     exit /b 1
 )
 if not exist "%PACKAGE%\Scripts\_Camp_CampTentNPCBedrollScript.pex" (
@@ -143,7 +143,7 @@ echo Build complete:
 echo   DLL: %PACKAGE%\SKSE\Plugins\CampfireTogether.dll
 echo   PEX: %PACKAGE%\Scripts\CampfireTogetherNative.pex
 echo   PEX: %PACKAGE%\Scripts\CampfireTogetherBridge.pex
-echo   PEX: %PACKAGE%\Scripts\CampConjureObjectEffect.pex
+echo   PEX: %PACKAGE%\Scripts\_Camp_SpawnCampfire.pex
 echo   PEX: %PACKAGE%\Scripts\_Camp_CampTentNPCBedrollScript.pex
 echo   ESP: %PACKAGE%\CampfireTogether.esp
 echo   ZIP: %ZIP%
