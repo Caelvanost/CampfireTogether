@@ -11,7 +11,8 @@ if not defined SKYRIM_PATH set "SKYRIM_PATH=C:\Games\Steam\steamapps\common\Skyr
 
 set "OUT=%PROJECT%\build\out"
 set "PACKAGE=%PROJECT%\build\package"
-set "ZIP=%PROJECT%\build\CampfireTogether-v%VERSION%.zip"
+set "DIST=%PROJECT%\dist"
+set "ZIP=%DIST%\CampfireTogether-v%VERSION%.zip"
 set "COMPILER=%SKYRIM_PATH%\Papyrus Compiler\PapyrusCompiler.exe"
 set "FLAGS=%SKYRIM_PATH%\Data\Source\Scripts\TESV_Papyrus_Flags.flg"
 set "VANILLA_SOURCE=%SKYRIM_PATH%\Data\Source\Scripts"
@@ -39,6 +40,7 @@ if exist "%ZIP%" del /q "%ZIP%"
 
 mkdir "%OUT%" >nul 2>&1
 mkdir "%PACKAGE%" >nul 2>&1
+if not exist "%DIST%" mkdir "%DIST%" >nul 2>&1
 
 echo [1/5] Configuring...
 cmake -S "%PROJECT%" -B "%OUT%" -G "Visual Studio 18 2026" -A x64 -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
