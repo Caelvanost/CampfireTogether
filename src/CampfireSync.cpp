@@ -168,9 +168,9 @@ namespace CampfireTogether
             }
 
             RE::TESObjectREFR* anchor = nullptr;
-            cell->ForEachReference([&anchor](RE::TESObjectREFR* reference) {
-                if (reference && !reference->IsMarkedForDeletion()) {
-                    anchor = reference;
+            cell->ForEachReference([&anchor](RE::TESObjectREFR& reference) {
+                if (!reference.IsMarkedForDeletion()) {
+                    anchor = std::addressof(reference);
                     return RE::BSContainer::ForEachResult::kStop;
                 }
                 return RE::BSContainer::ForEachResult::kContinue;
