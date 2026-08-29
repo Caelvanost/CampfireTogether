@@ -7,16 +7,48 @@ namespace CampfireTogether
 {
     namespace
     {
-        constexpr std::size_t kMaxLocalHistory = 256;
         constexpr std::size_t kMaxSuppressedRemovals = 64;
+        constexpr std::size_t kMaxPersistedPlacements = 100000;
         constexpr float kRemovalMatchRadius = 64.0f;
         constexpr auto kRemovalSuppressionLifetime = std::chrono::seconds(5);
+
+        constexpr std::uint32_t kStateRecordType = 0x54415453;  // "STAT"
+        constexpr std::uint32_t kStateRecordVersion = 2;
 
         struct FormIdentity
         {
             std::string pluginName;
             RE::FormID localFormID{ 0 };
         };
+
+#pragma pack(push, 1)
+        struct PersistedStateHeader
+        {
+            std::uint32_t count{ 0 };
+            std::uint32_t reserved{ 0 };
+            std::uint64_t nextEventID{ 1 };
+        };
+
+        struct PersistedPlacement
+        {
+            std::uint64_t eventID{ 0 };
+            std::uint32_t baseLocalFormID{ 0 };
+            char basePluginName[Protocol::kPluginNameCapacity]{};
+            std::uint32_t cellLocalFormID{ 0 };
+            char cellPluginName[Protocol::kPluginNameCapacity]{};
+            float positionX{ 0.0f };
+            float positionY{ 0.0f };
+            float positionZ{ 0.0f };
+            float angleX{ 0.0f };
+            float angleY{ 0.0f };
+            float angleZ{ 0.0f };
+            std::uint8_t flags{ Protocol::kNone };
+            std::uint8_t reserved[3]{};
+        };
+#pragma pack(pop)
+
+        static_assert(sizeof(PersistedStateHeader) == 16);
+        static_assert(sizeof(PersistedPlacement) == 564);
 
         [[nodiscard]] std::optional<FormIdentity> DescribeForm(RE::TESForm* form)
         {
@@ -42,27 +74,54 @@ namespace CampfireTogether
             return FormIdentity{ ownerFile->fileName, localFormID };
         }
 
-        Protocol::Packet MakePacket(
+        template <class T>
+        [[nodiscard]] T* ResolveFormIdentity(std::string_view pluginName, RE::FormID localFormID)
+        {
+            if (pluginName.empty() || localFormID == 0) {
+                return nullptr;
+            }
+
+            auto* dataHandler = RE::TESDataHandler::GetSingleton();
+            if (!dataHandler) {
+                return nullptr;
+            }
+
+            auto* form = dataHandler->LookupForm(localFormID, pluginName);
+            return form ? form->As<T>() : nullptr;
+        }
+
+        Protocol::Packet MakeObjectPacket(
             Protocol::PacketType type,
             std::uint64_t eventID,
             const FormIdentity& baseIdentity,
+            const FormIdentity& cellIdentity,
             float px,
             float py,
             float pz,
             float ax,
             float ay,
             float az,
-            bool isTent)
+            bool isTent,
+            std::uint64_t snapshotID = 0)
         {
             Protocol::Packet packet{};
             packet.type = type;
             packet.eventID = eventID;
+            packet.snapshotID = snapshotID;
             packet.baseLocalFormID = baseIdentity.localFormID;
             std::memcpy(
                 packet.basePluginName,
                 baseIdentity.pluginName.c_str(),
                 baseIdentity.pluginName.size() + 1);
+            packet.cellLocalFormID = cellIdentity.localFormID;
+            std::memcpy(
+                packet.cellPluginName,
+                cellIdentity.pluginName.c_str(),
+                cellIdentity.pluginName.size() + 1);
             packet.flags = isTent ? Protocol::kTent : Protocol::kNone;
+            if (snapshotID != 0) {
+                packet.flags |= Protocol::kSnapshot;
+            }
             packet.positionX = px;
             packet.positionY = py;
             packet.positionZ = pz;
@@ -72,17 +131,12 @@ namespace CampfireTogether
             return packet;
         }
 
-        [[nodiscard]] RE::TESBoundObject* ResolvePacketBase(const Protocol::Packet& packet)
+        Protocol::Packet MakeControlPacket(Protocol::PacketType type, std::uint64_t snapshotID)
         {
-            auto* dataHandler = RE::TESDataHandler::GetSingleton();
-            if (!dataHandler) {
-                return nullptr;
-            }
-
-            auto* form = dataHandler->LookupForm(
-                packet.baseLocalFormID,
-                std::string_view(packet.basePluginName));
-            return form ? form->As<RE::TESBoundObject>() : nullptr;
+            Protocol::Packet packet{};
+            packet.type = type;
+            packet.snapshotID = snapshotID;
+            return packet;
         }
 
         float DistanceSquared(float ax, float ay, float az, float bx, float by, float bz)
@@ -91,6 +145,37 @@ namespace CampfireTogether
             const float dy = ay - by;
             const float dz = az - bz;
             return dx * dx + dy * dy + dz * dz;
+        }
+
+        [[nodiscard]] RE::TESObjectREFR* FindAnchorInCell(
+            RE::TESObjectCELL* cell,
+            STRPM::ConnectionID sender)
+        {
+            if (!cell || !cell->IsAttached()) {
+                return nullptr;
+            }
+
+            if (auto* player = RE::PlayerCharacter::GetSingleton();
+                player && player->GetParentCell() == cell) {
+                return player;
+            }
+
+            if (const auto proxyID = STRPMClient::GetSingleton().ResolveProxy(sender)) {
+                if (auto* proxy = RE::TESForm::LookupByID<RE::TESObjectREFR>(*proxyID);
+                    proxy && proxy->GetParentCell() == cell) {
+                    return proxy;
+                }
+            }
+
+            RE::TESObjectREFR* anchor = nullptr;
+            cell->ForEachReference([&anchor](RE::TESObjectREFR* reference) {
+                if (reference && !reference->IsMarkedForDeletion()) {
+                    anchor = reference;
+                    return RE::BSContainer::ForEachResult::kStop;
+                }
+                return RE::BSContainer::ForEachResult::kContinue;
+            });
+            return anchor;
         }
     }
 
@@ -120,32 +205,51 @@ namespace CampfireTogether
             return;
         }
 
+        auto* parentCell = placedRef->GetParentCell();
+        if (!parentCell) {
+            parentCell = placedRef->GetSaveParentCell();
+        }
+
         const auto baseIdentity = DescribeForm(base);
-        if (!baseIdentity) {
+        const auto cellIdentity = DescribeForm(parentCell);
+        if (!baseIdentity || !cellIdentity) {
             SKSE::log::warn(
-                "CFT LOCAL PLACE ignored: base identity unavailable ref={:08X} runtimeBase={:08X}",
+                "CFT LOCAL PLACE ignored: identity unavailable ref={:08X} runtimeBase={:08X} cell={:08X}",
                 placedRef->GetFormID(),
-                base->GetFormID());
+                base->GetFormID(),
+                parentCell ? parentCell->GetFormID() : 0);
             return;
         }
 
         const auto eventID = _nextEventID.fetch_add(1);
-        const auto baseFormID = base->GetFormID();
+        const auto runtimeBaseFormID = base->GetFormID();
 
         {
             std::scoped_lock lock(_mutex);
-            _localPlacements.push_back({ eventID, baseFormID, positionX, positionY, positionZ, isTent });
-            while (_localPlacements.size() > kMaxLocalHistory) {
-                _localPlacements.pop_front();
-            }
+            _localPlacements.push_back({
+                eventID,
+                baseIdentity->pluginName,
+                baseIdentity->localFormID,
+                cellIdentity->pluginName,
+                cellIdentity->localFormID,
+                positionX,
+                positionY,
+                positionZ,
+                angleX,
+                angleY,
+                angleZ,
+                isTent
+            });
         }
 
         SKSE::log::info(
-            "CFT LOCAL PLACE ref={:08X} base={}:{:08X} runtimeBase={:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f}) rot=({:.2f},{:.2f},{:.2f})",
+            "CFT LOCAL PLACE ref={:08X} base={}:{:08X} runtimeBase={:08X} cell={}:{:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f}) rot=({:.2f},{:.2f},{:.2f})",
             placedRef->GetFormID(),
             baseIdentity->pluginName,
             baseIdentity->localFormID,
-            baseFormID,
+            runtimeBaseFormID,
+            cellIdentity->pluginName,
+            cellIdentity->localFormID,
             eventID,
             isTent ? 1 : 0,
             positionX,
@@ -155,10 +259,11 @@ namespace CampfireTogether
             angleY,
             angleZ);
 
-        (void)STRPMClient::GetSingleton().Send(MakePacket(
+        (void)STRPMClient::GetSingleton().Send(MakeObjectPacket(
             Protocol::PacketType::kPlace,
             eventID,
             *baseIdentity,
+            *cellIdentity,
             positionX,
             positionY,
             positionZ,
@@ -168,16 +273,25 @@ namespace CampfireTogether
             isTent));
     }
 
-    std::uint64_t CampfireSync::MatchLocalRemoval(RE::FormID baseFormID, float x, float y, float z, bool isTent)
+    std::optional<CampfireSync::LocalPlacement> CampfireSync::TakeLocalPlacement(
+        std::string_view pluginName,
+        RE::FormID localFormID,
+        float x,
+        float y,
+        float z,
+        bool isTent)
     {
         std::scoped_lock lock(_mutex);
 
         auto best = _localPlacements.end();
         float bestDistance = kRemovalMatchRadius * kRemovalMatchRadius;
         for (auto it = _localPlacements.begin(); it != _localPlacements.end(); ++it) {
-            if (it->baseFormID != baseFormID || it->isTent != isTent) {
+            if (it->localFormID != localFormID ||
+                std::string_view(it->pluginName) != pluginName ||
+                it->isTent != isTent) {
                 continue;
             }
+
             const auto distance = DistanceSquared(it->x, it->y, it->z, x, y, z);
             if (distance <= bestDistance) {
                 bestDistance = distance;
@@ -186,12 +300,12 @@ namespace CampfireTogether
         }
 
         if (best == _localPlacements.end()) {
-            return 0;
+            return std::nullopt;
         }
 
-        const auto eventID = best->eventID;
+        auto placement = *best;
         _localPlacements.erase(best);
-        return eventID;
+        return placement;
     }
 
     bool CampfireSync::ConsumeSuppressedRemoval(RE::FormID baseFormID, float x, float y, float z, bool isTent)
@@ -241,7 +355,7 @@ namespace CampfireTogether
         }
 
         _suppressedRemovals.push_back({
-            mirror.baseFormID,
+            mirror.runtimeBaseFormID,
             x,
             y,
             z,
@@ -264,11 +378,11 @@ namespace CampfireTogether
             return;
         }
 
-        const auto baseFormID = baseForm->GetFormID();
-        if (ConsumeSuppressedRemoval(baseFormID, positionX, positionY, positionZ, isTent)) {
+        const auto runtimeBaseFormID = baseForm->GetFormID();
+        if (ConsumeSuppressedRemoval(runtimeBaseFormID, positionX, positionY, positionZ, isTent)) {
             SKSE::log::info(
                 "CFT LOCAL REMOVE suppressed remote teardown runtimeBase={:08X} tent={} pos=({:.2f},{:.2f},{:.2f})",
-                baseFormID,
+                runtimeBaseFormID,
                 isTent ? 1 : 0,
                 positionX,
                 positionY,
@@ -278,27 +392,56 @@ namespace CampfireTogether
 
         const auto baseIdentity = DescribeForm(baseForm);
         if (!baseIdentity) {
-            SKSE::log::warn("CFT LOCAL REMOVE ignored: base identity unavailable runtimeBase={:08X}", baseFormID);
+            SKSE::log::warn(
+                "CFT LOCAL REMOVE ignored: base identity unavailable runtimeBase={:08X}",
+                runtimeBaseFormID);
             return;
         }
 
-        const auto eventID = MatchLocalRemoval(baseFormID, positionX, positionY, positionZ, isTent);
-
-        SKSE::log::info(
-            "CFT LOCAL REMOVE base={}:{:08X} runtimeBase={:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f})",
+        const auto tracked = TakeLocalPlacement(
             baseIdentity->pluginName,
             baseIdentity->localFormID,
-            baseFormID,
+            positionX,
+            positionY,
+            positionZ,
+            isTent);
+
+        std::uint64_t eventID = 0;
+        std::optional<FormIdentity> cellIdentity;
+        if (tracked) {
+            eventID = tracked->eventID;
+            cellIdentity = FormIdentity{ tracked->cellPluginName, tracked->cellLocalFormID };
+        } else if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+            cellIdentity = DescribeForm(player->GetParentCell());
+        }
+
+        if (!cellIdentity) {
+            SKSE::log::warn(
+                "CFT LOCAL REMOVE ignored: cell identity unavailable base={}:{:08X} event={}",
+                baseIdentity->pluginName,
+                baseIdentity->localFormID,
+                eventID);
+            return;
+        }
+
+        SKSE::log::info(
+            "CFT LOCAL REMOVE base={}:{:08X} runtimeBase={:08X} cell={}:{:08X} event={} tent={} pos=({:.2f},{:.2f},{:.2f})",
+            baseIdentity->pluginName,
+            baseIdentity->localFormID,
+            runtimeBaseFormID,
+            cellIdentity->pluginName,
+            cellIdentity->localFormID,
             eventID,
             isTent ? 1 : 0,
             positionX,
             positionY,
             positionZ);
 
-        (void)STRPMClient::GetSingleton().Send(MakePacket(
+        (void)STRPMClient::GetSingleton().Send(MakeObjectPacket(
             Protocol::PacketType::kRemove,
             eventID,
             *baseIdentity,
+            *cellIdentity,
             positionX,
             positionY,
             positionZ,
@@ -312,93 +455,480 @@ namespace CampfireTogether
     {
         switch (packet.type) {
         case Protocol::PacketType::kPlace:
-            SpawnRemote(sender, packet);
+            StoreRemotePlacement(sender, packet);
             break;
         case Protocol::PacketType::kRemove:
             RemoveRemote(sender, packet);
+            break;
+        case Protocol::PacketType::kSnapshotRequest:
+            SKSE::log::info("CFT SNAPSHOT REQUEST received connection={} request={}", sender, packet.snapshotID);
+            SendSnapshot(sender);
+            break;
+        case Protocol::PacketType::kSnapshotBegin:
+            BeginRemoteSnapshot(sender, packet.snapshotID);
+            break;
+        case Protocol::PacketType::kSnapshotEnd:
+            EndRemoteSnapshot(sender, packet.snapshotID);
             break;
         default:
             break;
         }
     }
 
-    void CampfireSync::SpawnRemote(STRPM::ConnectionID sender, const Protocol::Packet& packet)
+    void CampfireSync::OnPeerAvailable(STRPM::ConnectionID connectionID)
     {
-        const RemoteKey key{ sender, packet.eventID };
+        if (connectionID == 0) {
+            return;
+        }
+
+        SKSE::log::info("CFT PEER available connection={} requesting/replaying state", connectionID);
+        SendSnapshot(connectionID);
+        STRPMClient::GetSingleton().RequestSnapshot(connectionID);
+    }
+
+    void CampfireSync::OnPeerUnavailable(STRPM::ConnectionID connectionID)
+    {
+        if (connectionID == 0) {
+            return;
+        }
+
+        std::vector<RemoteMirror> mirrors;
+        std::size_t stateRemoved = 0;
         {
             std::scoped_lock lock(_mutex);
-            if (packet.eventID != 0 && _remoteMirrors.contains(key)) {
-                SKSE::log::trace("CFT REMOTE PLACE duplicate ignored connection={} event={}", sender, packet.eventID);
+
+            for (auto it = _remotePlacements.begin(); it != _remotePlacements.end();) {
+                if (it->first.sender == connectionID) {
+                    ++stateRemoved;
+                    it = _remotePlacements.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+
+            for (auto it = _remoteMirrors.begin(); it != _remoteMirrors.end();) {
+                if (it->first.sender == connectionID) {
+                    mirrors.push_back(it->second);
+                    it = _remoteMirrors.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            _remoteSnapshots.erase(connectionID);
+        }
+
+        for (const auto& mirror : mirrors) {
+            TeardownMirror(mirror);
+        }
+
+        SKSE::log::info(
+            "CFT PEER unavailable connection={} stateRemoved={} mirrorsRemoved={}",
+            connectionID,
+            stateRemoved,
+            mirrors.size());
+    }
+
+    void CampfireSync::OnAllPeersUnavailable()
+    {
+        std::vector<RemoteMirror> mirrors;
+        std::size_t stateRemoved = 0;
+        {
+            std::scoped_lock lock(_mutex);
+            stateRemoved = _remotePlacements.size();
+            _remotePlacements.clear();
+            mirrors.reserve(_remoteMirrors.size());
+            for (const auto& entry : _remoteMirrors) {
+                mirrors.push_back(entry.second);
+            }
+            _remoteMirrors.clear();
+            _remoteSnapshots.clear();
+        }
+
+        for (const auto& mirror : mirrors) {
+            TeardownMirror(mirror);
+        }
+
+        SKSE::log::info(
+            "CFT PEERS cleared stateRemoved={} mirrorsRemoved={}",
+            stateRemoved,
+            mirrors.size());
+    }
+
+    void CampfireSync::OnCellFullyLoaded(RE::TESObjectCELL* cell)
+    {
+        const auto cellIdentity = DescribeForm(cell);
+        if (!cellIdentity) {
+            return;
+        }
+
+        std::vector<RemoteKey> pending;
+        {
+            std::scoped_lock lock(_mutex);
+            for (const auto& entry : _remotePlacements) {
+                if (entry.second.cellLocalFormID == cellIdentity->localFormID &&
+                    entry.second.cellPluginName == cellIdentity->pluginName) {
+                    pending.push_back(entry.first);
+                }
+            }
+        }
+
+        if (pending.empty()) {
+            return;
+        }
+
+        SKSE::log::info(
+            "CFT CELL loaded cell={}:{:08X} pendingState={}",
+            cellIdentity->pluginName,
+            cellIdentity->localFormID,
+            pending.size());
+
+        for (const auto& key : pending) {
+            TryMaterializeRemote(key);
+        }
+    }
+
+    void CampfireSync::BroadcastSnapshot()
+    {
+        SendSnapshot(std::nullopt);
+    }
+
+    void CampfireSync::SendSnapshot(std::optional<STRPM::ConnectionID> target)
+    {
+        std::deque<LocalPlacement> placements;
+        {
+            std::scoped_lock lock(_mutex);
+            placements = _localPlacements;
+        }
+
+        const auto snapshotID = _nextSnapshotID.fetch_add(1);
+        const auto sendPacket = [&](const Protocol::Packet& packet) {
+            if (target) {
+                return STRPMClient::GetSingleton().SendTo(*target, packet);
+            }
+            return STRPMClient::GetSingleton().Send(packet);
+        };
+
+        if (!sendPacket(MakeControlPacket(Protocol::PacketType::kSnapshotBegin, snapshotID))) {
+            SKSE::log::debug(
+                "CFT SNAPSHOT TX begin failed target={} id={} objects={}",
+                target.value_or(0),
+                snapshotID,
+                placements.size());
+            return;
+        }
+
+        for (const auto& placement : placements) {
+            const FormIdentity baseIdentity{ placement.pluginName, placement.localFormID };
+            const FormIdentity cellIdentity{ placement.cellPluginName, placement.cellLocalFormID };
+            if (!sendPacket(MakeObjectPacket(
+                    Protocol::PacketType::kPlace,
+                    placement.eventID,
+                    baseIdentity,
+                    cellIdentity,
+                    placement.x,
+                    placement.y,
+                    placement.z,
+                    placement.angleX,
+                    placement.angleY,
+                    placement.angleZ,
+                    placement.isTent,
+                    snapshotID))) {
+                SKSE::log::warn(
+                    "CFT SNAPSHOT TX incomplete target={} id={} failedEvent={}",
+                    target.value_or(0),
+                    snapshotID,
+                    placement.eventID);
                 return;
             }
         }
 
-        const auto proxyID = STRPMClient::GetSingleton().ResolveProxy(sender);
-        if (!proxyID) {
-            SKSE::log::warn("CFT REMOTE PLACE deferred/ignored: no STR proxy connection={} event={}", sender, packet.eventID);
+        if (!sendPacket(MakeControlPacket(Protocol::PacketType::kSnapshotEnd, snapshotID))) {
+            SKSE::log::warn(
+                "CFT SNAPSHOT TX end failed target={} id={} objects={}",
+                target.value_or(0),
+                snapshotID,
+                placements.size());
             return;
         }
 
-        auto* anchor = RE::TESForm::LookupByID<RE::TESObjectREFR>(*proxyID);
-        auto* base = ResolvePacketBase(packet);
-        if (!anchor || !base) {
-            SKSE::log::warn(
-                "CFT REMOTE PLACE failed connection={} event={} proxy={:08X} base={}:{:08X} anchor={} baseFound={}",
+        SKSE::log::info(
+            "CFT SNAPSHOT TX complete target={} id={} objects={}",
+            target.value_or(0),
+            snapshotID,
+            placements.size());
+    }
+
+    void CampfireSync::BeginRemoteSnapshot(STRPM::ConnectionID sender, std::uint64_t snapshotID)
+    {
+        RemoteSnapshotState state{};
+        state.snapshotID = snapshotID;
+
+        {
+            std::scoped_lock lock(_mutex);
+            for (const auto& entry : _remotePlacements) {
+                if (entry.first.sender == sender && entry.first.eventID != 0) {
+                    state.baselineEvents.insert(entry.first.eventID);
+                }
+            }
+            _remoteSnapshots[sender] = std::move(state);
+        }
+
+        std::size_t baselineCount = 0;
+        {
+            std::scoped_lock lock(_mutex);
+            if (const auto it = _remoteSnapshots.find(sender); it != _remoteSnapshots.end()) {
+                baselineCount = it->second.baselineEvents.size();
+            }
+        }
+
+        SKSE::log::info(
+            "CFT SNAPSHOT RX begin connection={} id={} baseline={}",
+            sender,
+            snapshotID,
+            baselineCount);
+    }
+
+    void CampfireSync::EndRemoteSnapshot(STRPM::ConnectionID sender, std::uint64_t snapshotID)
+    {
+        std::vector<RemoteMirror> staleMirrors;
+        std::size_t seenCount = 0;
+        std::size_t baselineCount = 0;
+        std::size_t staleStateRemoved = 0;
+
+        {
+            std::scoped_lock lock(_mutex);
+            const auto stateIt = _remoteSnapshots.find(sender);
+            if (stateIt == _remoteSnapshots.end() || stateIt->second.snapshotID != snapshotID) {
+                SKSE::log::warn(
+                    "CFT SNAPSHOT RX end ignored connection={} id={} active={}",
+                    sender,
+                    snapshotID,
+                    stateIt != _remoteSnapshots.end() ? stateIt->second.snapshotID : 0);
+                return;
+            }
+
+            const auto& state = stateIt->second;
+            seenCount = state.seenEvents.size();
+            baselineCount = state.baselineEvents.size();
+
+            for (const auto eventID : state.baselineEvents) {
+                if (state.seenEvents.contains(eventID)) {
+                    continue;
+                }
+
+                const RemoteKey key{ sender, eventID };
+                staleStateRemoved += _remotePlacements.erase(key);
+                if (const auto mirrorIt = _remoteMirrors.find(key); mirrorIt != _remoteMirrors.end()) {
+                    staleMirrors.push_back(mirrorIt->second);
+                    _remoteMirrors.erase(mirrorIt);
+                }
+            }
+
+            _remoteSnapshots.erase(stateIt);
+        }
+
+        for (const auto& mirror : staleMirrors) {
+            TeardownMirror(mirror);
+        }
+
+        SKSE::log::info(
+            "CFT SNAPSHOT RX complete connection={} id={} baseline={} seen={} staleStateRemoved={} staleMirrorsRemoved={}",
+            sender,
+            snapshotID,
+            baselineCount,
+            seenCount,
+            staleStateRemoved,
+            staleMirrors.size());
+    }
+
+    void CampfireSync::StoreRemotePlacement(STRPM::ConnectionID sender, const Protocol::Packet& packet)
+    {
+        const RemoteKey key{ sender, packet.eventID };
+        const RemotePlacement placement{
+            packet.basePluginName,
+            packet.baseLocalFormID,
+            packet.cellPluginName,
+            packet.cellLocalFormID,
+            packet.positionX,
+            packet.positionY,
+            packet.positionZ,
+            packet.angleX,
+            packet.angleY,
+            packet.angleZ,
+            (packet.flags & Protocol::kTent) != 0
+        };
+
+        bool alreadyMaterialized = false;
+        {
+            std::scoped_lock lock(_mutex);
+
+            if (packet.snapshotID != 0) {
+                if (const auto stateIt = _remoteSnapshots.find(sender);
+                    stateIt != _remoteSnapshots.end() && stateIt->second.snapshotID == packet.snapshotID) {
+                    stateIt->second.seenEvents.insert(packet.eventID);
+                }
+            }
+
+            _remotePlacements.insert_or_assign(key, placement);
+
+            if (const auto mirrorIt = _remoteMirrors.find(key); mirrorIt != _remoteMirrors.end()) {
+                if (mirrorIt->second.handle.get()) {
+                    alreadyMaterialized = true;
+                } else {
+                    _remoteMirrors.erase(mirrorIt);
+                }
+            }
+        }
+
+        if (alreadyMaterialized) {
+            SKSE::log::trace(
+                "CFT REMOTE STATE duplicate/materialized connection={} event={} snapshot={}",
                 sender,
                 packet.eventID,
-                *proxyID,
-                packet.basePluginName,
-                packet.baseLocalFormID,
-                anchor ? 1 : 0,
-                base ? 1 : 0);
+                packet.snapshotID);
+            return;
+        }
+
+        SKSE::log::info(
+            "CFT REMOTE STATE stored connection={} event={} snapshot={} base={}:{:08X} cell={}:{:08X}",
+            sender,
+            packet.eventID,
+            packet.snapshotID,
+            packet.basePluginName,
+            packet.baseLocalFormID,
+            packet.cellPluginName,
+            packet.cellLocalFormID);
+
+        TryMaterializeRemote(key);
+    }
+
+    void CampfireSync::TryMaterializeRemote(const RemoteKey& key)
+    {
+        RemotePlacement placement{};
+        {
+            std::scoped_lock lock(_mutex);
+            const auto stateIt = _remotePlacements.find(key);
+            if (stateIt == _remotePlacements.end()) {
+                return;
+            }
+            placement = stateIt->second;
+
+            if (const auto mirrorIt = _remoteMirrors.find(key); mirrorIt != _remoteMirrors.end()) {
+                if (mirrorIt->second.handle.get()) {
+                    return;
+                }
+                _remoteMirrors.erase(mirrorIt);
+            }
+        }
+
+        auto* targetCell = ResolveFormIdentity<RE::TESObjectCELL>(
+            placement.cellPluginName,
+            placement.cellLocalFormID);
+        if (!targetCell) {
+            SKSE::log::warn(
+                "CFT REMOTE MATERIALIZE failed unresolved cell connection={} event={} cell={}:{:08X}",
+                key.sender,
+                key.eventID,
+                placement.cellPluginName,
+                placement.cellLocalFormID);
+            return;
+        }
+
+        if (!targetCell->IsAttached()) {
+            SKSE::log::debug(
+                "CFT REMOTE MATERIALIZE pending unloaded cell connection={} event={} cell={}:{:08X}",
+                key.sender,
+                key.eventID,
+                placement.cellPluginName,
+                placement.cellLocalFormID);
+            return;
+        }
+
+        auto* base = ResolveFormIdentity<RE::TESBoundObject>(placement.pluginName, placement.localFormID);
+        if (!base) {
+            SKSE::log::warn(
+                "CFT REMOTE MATERIALIZE failed unresolved base connection={} event={} base={}:{:08X}",
+                key.sender,
+                key.eventID,
+                placement.pluginName,
+                placement.localFormID);
+            return;
+        }
+
+        auto* anchor = FindAnchorInCell(targetCell, key.sender);
+        if (!anchor) {
+            SKSE::log::warn(
+                "CFT REMOTE MATERIALIZE pending no anchor connection={} event={} cell={}:{:08X}",
+                key.sender,
+                key.eventID,
+                placement.cellPluginName,
+                placement.cellLocalFormID);
             return;
         }
 
         auto mirror = anchor->PlaceObjectAtMe(base, false);
         if (!mirror) {
             SKSE::log::warn(
-                "CFT REMOTE PLACE PlaceObjectAtMe failed connection={} event={} base={}:{:08X} runtimeBase={:08X}",
-                sender,
-                packet.eventID,
-                packet.basePluginName,
-                packet.baseLocalFormID,
-                base->GetFormID());
+                "CFT REMOTE MATERIALIZE PlaceObjectAtMe failed connection={} event={} base={}:{:08X}",
+                key.sender,
+                key.eventID,
+                placement.pluginName,
+                placement.localFormID);
             return;
         }
 
-        mirror->SetPosition(packet.positionX, packet.positionY, packet.positionZ);
+        mirror->SetPosition(placement.x, placement.y, placement.z);
         mirror->data.angle = {
-            RE::deg_to_rad(packet.angleX),
-            RE::deg_to_rad(packet.angleY),
-            RE::deg_to_rad(packet.angleZ)
+            RE::deg_to_rad(placement.angleX),
+            RE::deg_to_rad(placement.angleY),
+            RE::deg_to_rad(placement.angleZ)
         };
         mirror->Update3DPosition(true);
 
         const auto handle = mirror->CreateRefHandle();
-        if (packet.eventID != 0) {
+        bool duplicate = false;
+        {
             std::scoped_lock lock(_mutex);
-            _remoteMirrors.emplace(key, RemoteMirror{
-                handle,
-                base->GetFormID(),
-                packet.positionX,
-                packet.positionY,
-                packet.positionZ,
-                (packet.flags & Protocol::kTent) != 0
-            });
+            if (!_remotePlacements.contains(key)) {
+                duplicate = true;
+            } else if (const auto existing = _remoteMirrors.find(key);
+                       existing != _remoteMirrors.end() && existing->second.handle.get()) {
+                duplicate = true;
+            } else {
+                _remoteMirrors.insert_or_assign(key, RemoteMirror{
+                    handle,
+                    base->GetFormID(),
+                    placement.pluginName,
+                    placement.localFormID,
+                    placement.cellPluginName,
+                    placement.cellLocalFormID,
+                    placement.x,
+                    placement.y,
+                    placement.z,
+                    placement.isTent
+                });
+            }
+        }
+
+        if (duplicate) {
+            DeleteMirror(handle);
+            return;
         }
 
         SKSE::log::info(
-            "CFT REMOTE PLACE created connection={} event={} mirror={:08X} base={}:{:08X} runtimeBase={:08X} tent={} pos=({:.2f},{:.2f},{:.2f})",
-            sender,
-            packet.eventID,
+            "CFT REMOTE PLACE created connection={} event={} mirror={:08X} base={}:{:08X} runtimeBase={:08X} cell={}:{:08X} tent={} pos=({:.2f},{:.2f},{:.2f})",
+            key.sender,
+            key.eventID,
             mirror->GetFormID(),
-            packet.basePluginName,
-            packet.baseLocalFormID,
+            placement.pluginName,
+            placement.localFormID,
             base->GetFormID(),
-            (packet.flags & Protocol::kTent) ? 1 : 0,
-            packet.positionX,
-            packet.positionY,
-            packet.positionZ);
+            placement.cellPluginName,
+            placement.cellLocalFormID,
+            placement.isTent ? 1 : 0,
+            placement.x,
+            placement.y,
+            placement.z);
     }
 
     bool CampfireSync::DispatchTakeDown(RE::ObjectRefHandle handle, const char* scriptName)
@@ -422,13 +952,19 @@ namespace CampfireTogether
 
         const auto vmHandle = policy->GetHandleForObject(reference->GetFormType(), reference.get());
         if (vmHandle == policy->EmptyHandle()) {
-            SKSE::log::warn("CFT REMOTE TEARDOWN failed: no VM handle ref={:08X} script={}", reference->GetFormID(), scriptName);
+            SKSE::log::warn(
+                "CFT REMOTE TEARDOWN failed: no VM handle ref={:08X} script={}",
+                reference->GetFormID(),
+                scriptName);
             return false;
         }
 
         RE::BSTSmartPointer<RE::BSScript::Object> scriptObject;
         if (!vm->FindBoundObject(vmHandle, scriptName, scriptObject) || !scriptObject) {
-            SKSE::log::warn("CFT REMOTE TEARDOWN script not bound ref={:08X} script={}", reference->GetFormID(), scriptName);
+            SKSE::log::warn(
+                "CFT REMOTE TEARDOWN script not bound ref={:08X} script={}",
+                reference->GetFormID(),
+                scriptName);
             return false;
         }
 
@@ -436,7 +972,10 @@ namespace CampfireTogether
         RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
         if (!vm->DispatchMethodCall(scriptObject, "TakeDown", args, callback)) {
             delete args;
-            SKSE::log::warn("CFT REMOTE TEARDOWN dispatch failed ref={:08X} script={}", reference->GetFormID(), scriptName);
+            SKSE::log::warn(
+                "CFT REMOTE TEARDOWN dispatch failed ref={:08X} script={}",
+                reference->GetFormID(),
+                scriptName);
             return false;
         }
 
@@ -465,75 +1004,105 @@ namespace CampfireTogether
         const char* scriptName = mirror.isTent ? "CampTent" : "CampCampfire";
         if (DispatchTakeDown(mirror.handle, scriptName)) {
             if (mirror.isTent) {
-                SKSE::log::info("CFT REMOTE TENT TEARDOWN dispatched ref={:08X} runtimeBase={:08X}", reference->GetFormID(), mirror.baseFormID);
+                SKSE::log::info(
+                    "CFT REMOTE TENT TEARDOWN dispatched ref={:08X} base={}:{:08X} runtimeBase={:08X}",
+                    reference->GetFormID(),
+                    mirror.pluginName,
+                    mirror.localFormID,
+                    mirror.runtimeBaseFormID);
             } else {
-                SKSE::log::info("CFT REMOTE CAMPFIRE TEARDOWN dispatched ref={:08X} runtimeBase={:08X}", reference->GetFormID(), mirror.baseFormID);
+                SKSE::log::info(
+                    "CFT REMOTE CAMPFIRE TEARDOWN dispatched ref={:08X} base={}:{:08X} runtimeBase={:08X}",
+                    reference->GetFormID(),
+                    mirror.pluginName,
+                    mirror.localFormID,
+                    mirror.runtimeBaseFormID);
             }
             return;
         }
 
         DeleteMirror(mirror.handle);
-        SKSE::log::info("CFT REMOTE GENERIC TEARDOWN fallback ref={:08X} runtimeBase={:08X} tent={}", reference->GetFormID(), mirror.baseFormID, mirror.isTent ? 1 : 0);
+        SKSE::log::info(
+            "CFT REMOTE GENERIC TEARDOWN fallback ref={:08X} base={}:{:08X} runtimeBase={:08X} tent={}",
+            reference->GetFormID(),
+            mirror.pluginName,
+            mirror.localFormID,
+            mirror.runtimeBaseFormID,
+            mirror.isTent ? 1 : 0);
     }
 
     void CampfireSync::RemoveRemote(STRPM::ConnectionID sender, const Protocol::Packet& packet)
     {
-        RemoteMirror remote{};
-        bool found = false;
-
-        auto* expectedBase = ResolvePacketBase(packet);
-        const auto expectedBaseFormID = expectedBase ? expectedBase->GetFormID() : RE::FormID{ 0 };
+        std::optional<RemoteKey> matchedKey;
+        RemoteMirror remoteMirror{};
+        bool hasMirror = false;
 
         {
             std::scoped_lock lock(_mutex);
+
             if (packet.eventID != 0) {
                 const RemoteKey key{ sender, packet.eventID };
-                if (const auto it = _remoteMirrors.find(key); it != _remoteMirrors.end()) {
-                    remote = it->second;
-                    _remoteMirrors.erase(it);
-                    found = true;
+                if (_remotePlacements.contains(key)) {
+                    matchedKey = key;
                 }
             }
 
-            if (!found && expectedBaseFormID != 0) {
-                for (auto it = _remoteMirrors.begin(); it != _remoteMirrors.end(); ++it) {
-                    if (it->first.sender != sender || it->second.baseFormID != expectedBaseFormID) {
+            if (!matchedKey) {
+                for (const auto& entry : _remotePlacements) {
+                    if (entry.first.sender != sender ||
+                        entry.second.localFormID != packet.baseLocalFormID ||
+                        entry.second.pluginName != packet.basePluginName ||
+                        entry.second.cellLocalFormID != packet.cellLocalFormID ||
+                        entry.second.cellPluginName != packet.cellPluginName) {
                         continue;
                     }
-                    auto ref = it->second.handle.get();
-                    if (!ref) {
-                        continue;
-                    }
-                    const auto& p = ref->data.location;
-                    if (DistanceSquared(p.x, p.y, p.z, packet.positionX, packet.positionY, packet.positionZ) <= kRemovalMatchRadius * kRemovalMatchRadius) {
-                        remote = it->second;
-                        _remoteMirrors.erase(it);
-                        found = true;
+
+                    if (DistanceSquared(
+                            entry.second.x,
+                            entry.second.y,
+                            entry.second.z,
+                            packet.positionX,
+                            packet.positionY,
+                            packet.positionZ) <= kRemovalMatchRadius * kRemovalMatchRadius) {
+                        matchedKey = entry.first;
                         break;
                     }
                 }
             }
+
+            if (matchedKey) {
+                _remotePlacements.erase(*matchedKey);
+                if (const auto mirrorIt = _remoteMirrors.find(*matchedKey); mirrorIt != _remoteMirrors.end()) {
+                    remoteMirror = mirrorIt->second;
+                    _remoteMirrors.erase(mirrorIt);
+                    hasMirror = true;
+                }
+            }
         }
 
-        if (!found) {
+        if (!matchedKey) {
             SKSE::log::warn(
-                "CFT REMOTE REMOVE no mirror match connection={} event={} base={}:{:08X} resolvedRuntimeBase={:08X}",
+                "CFT REMOTE REMOVE no state match connection={} event={} base={}:{:08X} cell={}:{:08X}",
                 sender,
                 packet.eventID,
                 packet.basePluginName,
                 packet.baseLocalFormID,
-                expectedBaseFormID);
+                packet.cellPluginName,
+                packet.cellLocalFormID);
             return;
         }
 
-        TeardownMirror(remote);
+        if (hasMirror) {
+            TeardownMirror(remoteMirror);
+        }
+
         SKSE::log::info(
-            "CFT REMOTE REMOVE handled connection={} event={} base={}:{:08X} runtimeBase={:08X}",
+            "CFT REMOTE REMOVE handled connection={} event={} materialized={} base={}:{:08X}",
             sender,
-            packet.eventID,
+            matchedKey->eventID,
+            hasMirror ? 1 : 0,
             packet.basePluginName,
-            packet.baseLocalFormID,
-            remote.baseFormID);
+            packet.baseLocalFormID);
     }
 
     bool CampfireSync::IsRemoteCampObject(RE::TESObjectREFR* reference) const
@@ -554,22 +1123,228 @@ namespace CampfireTogether
         return false;
     }
 
-    void CampfireSync::Reset()
+    void CampfireSync::SavePersistentState(SKSE::SerializationInterface* serialization) const
     {
-        std::deque<RemoteMirror> mirrors;
-        {
-            std::scoped_lock lock(_mutex);
-            for (const auto& entry : _remoteMirrors) {
-                mirrors.push_back(entry.second);
-            }
-            _remoteMirrors.clear();
-            _localPlacements.clear();
-            _suppressedRemovals.clear();
+        if (!serialization) {
+            return;
         }
 
-        for (const auto& mirror : mirrors) {
-            TeardownMirror(mirror);
+        std::deque<LocalPlacement> placements;
+        {
+            std::scoped_lock lock(_mutex);
+            placements = _localPlacements;
         }
-        SKSE::log::info("CFT state reset mirrors={}", mirrors.size());
+
+        if (placements.size() > kMaxPersistedPlacements) {
+            SKSE::log::error(
+                "CFT STATE SAVE refused unreasonable active object count={}",
+                placements.size());
+            return;
+        }
+
+        std::vector<PersistedPlacement> persisted;
+        persisted.reserve(placements.size());
+        for (const auto& placement : placements) {
+            if (placement.eventID == 0 ||
+                placement.localFormID == 0 ||
+                placement.cellLocalFormID == 0 ||
+                placement.pluginName.empty() ||
+                placement.cellPluginName.empty() ||
+                placement.pluginName.size() >= Protocol::kPluginNameCapacity ||
+                placement.cellPluginName.size() >= Protocol::kPluginNameCapacity) {
+                continue;
+            }
+
+            PersistedPlacement record{};
+            record.eventID = placement.eventID;
+            record.baseLocalFormID = placement.localFormID;
+            std::memcpy(
+                record.basePluginName,
+                placement.pluginName.c_str(),
+                placement.pluginName.size() + 1);
+            record.cellLocalFormID = placement.cellLocalFormID;
+            std::memcpy(
+                record.cellPluginName,
+                placement.cellPluginName.c_str(),
+                placement.cellPluginName.size() + 1);
+            record.positionX = placement.x;
+            record.positionY = placement.y;
+            record.positionZ = placement.z;
+            record.angleX = placement.angleX;
+            record.angleY = placement.angleY;
+            record.angleZ = placement.angleZ;
+            record.flags = placement.isTent ? Protocol::kTent : Protocol::kNone;
+            persisted.push_back(record);
+        }
+
+        if (!serialization->OpenRecord(kStateRecordType, kStateRecordVersion)) {
+            SKSE::log::error("CFT STATE SAVE failed: OpenRecord");
+            return;
+        }
+
+        PersistedStateHeader header{};
+        header.count = static_cast<std::uint32_t>(persisted.size());
+        header.nextEventID = _nextEventID.load();
+
+        if (!serialization->WriteRecordData(header)) {
+            SKSE::log::error("CFT STATE SAVE failed: header");
+            return;
+        }
+
+        for (const auto& record : persisted) {
+            if (!serialization->WriteRecordData(record)) {
+                SKSE::log::error("CFT STATE SAVE failed: event={}", record.eventID);
+                return;
+            }
+        }
+
+        SKSE::log::info(
+            "CFT STATE SAVE objects={} nextEvent={}",
+            persisted.size(),
+            header.nextEventID);
+    }
+
+    void CampfireSync::LoadPersistentState(SKSE::SerializationInterface* serialization)
+    {
+        if (!serialization) {
+            return;
+        }
+
+        std::deque<LocalPlacement> loadedPlacements;
+        std::unordered_set<std::uint64_t> loadedEventIDs;
+        std::uint64_t nextEventID = 1;
+        std::uint64_t maxEventID = 0;
+        bool foundState = false;
+
+        std::uint32_t type = 0;
+        std::uint32_t version = 0;
+        std::uint32_t length = 0;
+        while (serialization->GetNextRecordInfo(type, version, length)) {
+            if (type != kStateRecordType) {
+                continue;
+            }
+
+            foundState = true;
+            if (version != kStateRecordVersion) {
+                SKSE::log::warn(
+                    "CFT STATE LOAD skipped unsupported record version={} bytes={}",
+                    version,
+                    length);
+                continue;
+            }
+
+            PersistedStateHeader header{};
+            if (serialization->ReadRecordData(header) != sizeof(header)) {
+                SKSE::log::error("CFT STATE LOAD failed: truncated header");
+                continue;
+            }
+
+            if (header.count > kMaxPersistedPlacements) {
+                SKSE::log::error(
+                    "CFT STATE LOAD rejected unreasonable count={}",
+                    header.count);
+                continue;
+            }
+
+            nextEventID = std::max<std::uint64_t>(nextEventID, header.nextEventID);
+
+            for (std::uint32_t i = 0; i < header.count; ++i) {
+                PersistedPlacement record{};
+                if (serialization->ReadRecordData(record) != sizeof(record)) {
+                    SKSE::log::error(
+                        "CFT STATE LOAD truncated placement index={} count={}",
+                        i,
+                        header.count);
+                    break;
+                }
+
+                if (record.eventID == 0 ||
+                    record.baseLocalFormID == 0 ||
+                    record.cellLocalFormID == 0 ||
+                    record.basePluginName[0] == '\0' ||
+                    record.cellPluginName[0] == '\0' ||
+                    record.basePluginName[Protocol::kPluginNameCapacity - 1] != '\0' ||
+                    record.cellPluginName[Protocol::kPluginNameCapacity - 1] != '\0' ||
+                    loadedEventIDs.contains(record.eventID)) {
+                    continue;
+                }
+
+                if (!ResolveFormIdentity<RE::TESBoundObject>(record.basePluginName, record.baseLocalFormID)) {
+                    SKSE::log::warn(
+                        "CFT STATE LOAD skipped unresolved base={}:{:08X} event={}",
+                        record.basePluginName,
+                        record.baseLocalFormID,
+                        record.eventID);
+                    continue;
+                }
+
+                if (!ResolveFormIdentity<RE::TESObjectCELL>(record.cellPluginName, record.cellLocalFormID)) {
+                    SKSE::log::warn(
+                        "CFT STATE LOAD skipped unresolved cell={}:{:08X} event={}",
+                        record.cellPluginName,
+                        record.cellLocalFormID,
+                        record.eventID);
+                    continue;
+                }
+
+                loadedEventIDs.insert(record.eventID);
+                maxEventID = std::max(maxEventID, record.eventID);
+                loadedPlacements.push_back({
+                    record.eventID,
+                    record.basePluginName,
+                    record.baseLocalFormID,
+                    record.cellPluginName,
+                    record.cellLocalFormID,
+                    record.positionX,
+                    record.positionY,
+                    record.positionZ,
+                    record.angleX,
+                    record.angleY,
+                    record.angleZ,
+                    (record.flags & Protocol::kTent) != 0
+                });
+            }
+        }
+
+        nextEventID = std::max(nextEventID, maxEventID + 1);
+        if (nextEventID == 0) {
+            nextEventID = 1;
+        }
+
+        {
+            std::scoped_lock lock(_mutex);
+            _localPlacements = std::move(loadedPlacements);
+        }
+        _nextEventID.store(nextEventID);
+
+        SKSE::log::info(
+            "CFT STATE LOAD objects={} nextEvent={} recordFound={}",
+            loadedEventIDs.size(),
+            nextEventID,
+            foundState ? 1 : 0);
+    }
+
+    void CampfireSync::ClearPersistentState()
+    {
+        {
+            std::scoped_lock lock(_mutex);
+            _localPlacements.clear();
+        }
+        _nextEventID.store(1);
+        SKSE::log::info("CFT STATE cleared local ownership registry");
+    }
+
+    void CampfireSync::ResetRemoteState()
+    {
+        OnAllPeersUnavailable();
+        SKSE::log::info("CFT remote state reset");
+    }
+
+    void CampfireSync::Reset()
+    {
+        ResetRemoteState();
+        ClearPersistentState();
+        _nextSnapshotID.store(1);
+        SKSE::log::info("CFT full state reset");
     }
 }

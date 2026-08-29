@@ -2,8 +2,10 @@
 
 #include "CampfireSync.h"
 #include "CampfireTogether/Version.h"
+#include "CellTracker.h"
 #include "LocalBuildIntent.h"
 #include "PapyrusBridge.h"
+#include "Serialization.h"
 #include "STRPMClient.h"
 
 namespace logger = SKSE::log;
@@ -25,15 +27,24 @@ namespace
         spdlog::set_default_logger(std::move(log));
     }
 
-    void InitializeRuntime(const char* reason, bool reset)
+    void InitializeRuntime(const char* reason)
     {
-        logger::info("CFT runtime init reason={} reset={}", reason, reset ? 1 : 0);
-        if (reset) {
-            CampfireTogether::CampfireSync::GetSingleton().Reset();
-            CampfireTogether::LocalBuildIntent::Reset();
-        }
+        logger::info("CFT runtime init reason={}", reason);
         CampfireTogether::LocalBuildIntent::RegisterInputSink();
+        CampfireTogether::CellTracker::Register();
         CampfireTogether::STRPMClient::GetSingleton().Initialize();
+    }
+
+    void ExchangeState(const char* reason)
+    {
+        logger::info("CFT state exchange reason={}", reason);
+        auto& client = CampfireTogether::STRPMClient::GetSingleton();
+        if (!client.Initialize()) {
+            return;
+        }
+
+        CampfireTogether::CampfireSync::GetSingleton().BroadcastSnapshot();
+        client.RequestSnapshots();
     }
 
     void OnSKSEMessage(SKSE::MessagingInterface::Message* message)
@@ -47,13 +58,24 @@ namespace
             CampfireTogether::LocalBuildIntent::RegisterInputSink();
             break;
         case SKSE::MessagingInterface::kDataLoaded:
-            InitializeRuntime("data-loaded", false);
+            InitializeRuntime("data-loaded");
+            break;
+        case SKSE::MessagingInterface::kPreLoadGame:
+            logger::info("CFT preparing for save load");
+            CampfireTogether::CampfireSync::GetSingleton().ResetRemoteState();
+            CampfireTogether::LocalBuildIntent::Reset();
             break;
         case SKSE::MessagingInterface::kPostLoadGame:
-            InitializeRuntime("post-load-game", true);
+            CampfireTogether::CampfireSync::GetSingleton().ResetRemoteState();
+            CampfireTogether::LocalBuildIntent::Reset();
+            InitializeRuntime("post-load-game");
+            ExchangeState("post-load-game");
             break;
         case SKSE::MessagingInterface::kNewGame:
-            InitializeRuntime("new-game", true);
+            CampfireTogether::CampfireSync::GetSingleton().Reset();
+            CampfireTogether::LocalBuildIntent::Reset();
+            InitializeRuntime("new-game");
+            ExchangeState("new-game");
             break;
         default:
             break;
@@ -71,6 +93,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     auto* papyrus = SKSE::GetPapyrusInterface();
     if (!papyrus || !papyrus->Register(CampfireTogether::PapyrusBridge::Register)) {
         logger::critical("Failed to register CampfireTogether Papyrus native functions");
+        return false;
+    }
+
+    if (!CampfireTogether::Serialization::Register()) {
+        logger::critical("Failed to register CampfireTogether serialization callbacks");
         return false;
     }
 
