@@ -826,7 +826,7 @@ namespace CampfireTogether
             placement.cellLocalFormID);
         if (!targetCell) {
             SKSE::log::warn(
-                "CFT REMOTE MATERIALIZE failed unresolved cell connection={} event={} cell={}:{:08X}",
+                "CFT REMOTE MATERIALIZE pending unresolved cell connection={} event={} cell={}:{:08X}",
                 key.sender,
                 key.eventID,
                 placement.cellPluginName,
@@ -1274,15 +1274,6 @@ namespace CampfireTogether
                         "CFT STATE LOAD skipped unresolved base={}:{:08X} event={}",
                         record.basePluginName,
                         record.baseLocalFormID,
-                        record.eventID);
-                    continue;
-                }
-
-                if (!ResolveFormIdentity<RE::TESObjectCELL>(record.cellPluginName, record.cellLocalFormID)) {
-                    SKSE::log::warn(
-                        "CFT STATE LOAD skipped unresolved cell={}:{:08X} event={}",
-                        record.cellPluginName,
-                        record.cellLocalFormID,
                         record.eventID);
                     continue;
                 }
