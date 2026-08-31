@@ -167,15 +167,7 @@ namespace CampfireTogether
                 }
             }
 
-            RE::TESObjectREFR* anchor = nullptr;
-            cell->ForEachReference([&anchor](RE::TESObjectREFR& reference) {
-                if (!reference.IsMarkedForDeletion()) {
-                    anchor = std::addressof(reference);
-                    return RE::BSContainer::ForEachResult::kStop;
-                }
-                return RE::BSContainer::ForEachResult::kContinue;
-            });
-            return anchor;
+            return nullptr;
         }
     }
 
@@ -857,8 +849,8 @@ namespace CampfireTogether
 
         auto* anchor = FindAnchorInCell(targetCell, key.sender);
         if (!anchor) {
-            SKSE::log::warn(
-                "CFT REMOTE MATERIALIZE pending no anchor connection={} event={} cell={}:{:08X}",
+            SKSE::log::debug(
+                "CFT REMOTE MATERIALIZE pending no active anchor connection={} event={} cell={}:{:08X}",
                 key.sender,
                 key.eventID,
                 placement.cellPluginName,
