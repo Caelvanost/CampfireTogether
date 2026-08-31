@@ -29,11 +29,16 @@ namespace CampfireTogether
         void HandleProxyMapping(const STRPM::ProxyMappingEvent& event);
         [[nodiscard]] bool SendImpl(STRPM::Target target, const Protocol::Packet& packet) const;
         [[nodiscard]] Protocol::Packet MakeSnapshotRequest();
+        [[nodiscard]] bool MarkPeerObserved(STRPM::ConnectionID connectionID);
+        void ForgetPeer(STRPM::ConnectionID connectionID);
+        void ForgetAllPeers();
 
         const STRPM::Interface* _api{ nullptr };
         const STRPM::ProxyResolverInterface* _resolver{ nullptr };
         STRPM::ListenerHandle _listener{};
         bool _proxyListenerRegistered{ false };
         std::atomic<std::uint64_t> _nextSnapshotRequestID{ 1 };
+        std::mutex _peerMutex;
+        std::unordered_set<STRPM::ConnectionID> _observedPeers;
     };
 }
