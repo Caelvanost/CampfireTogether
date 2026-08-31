@@ -80,6 +80,7 @@ namespace CampfireTogether
         _listener = {};
         _resolver = nullptr;
         _api = nullptr;
+        ForgetAllPeers();
     }
 
     bool STRPMClient::Send(const Protocol::Packet& packet) const
@@ -217,6 +218,30 @@ namespace CampfireTogether
         }
     }
 
+    bool STRPMClient::MarkPeerObserved(STRPM::ConnectionID connectionID)
+    {
+        if (connectionID == 0) {
+            return false;
+        }
+        std::scoped_lock lock(_peerMutex);
+        return _observedPeers.insert(connectionID).second;
+    }
+
+    void STRPMClient::ForgetPeer(STRPM::ConnectionID connectionID)
+    {
+        if (connectionID == 0) {
+            return;
+        }
+        std::scoped_lock lock(_peerMutex);
+        _observedPeers.erase(connectionID);
+    }
+
+    void STRPMClient::ForgetAllPeers()
+    {
+        std::scoped_lock lock(_peerMutex);
+        _observedPeers.clear();
+    }
+
     void STRPM_CALL STRPMClient::OnMessage(const STRPM::Message* message, void* userData)
     {
         if (message && userData) {
@@ -251,6 +276,7 @@ namespace CampfireTogether
                     "CFT STRPM PROXY added connection={} proxy={:08X}",
                     event.connectionID,
                     event.newFormID);
+                MarkPeerObserved(event.connectionID);
                 CampfireSync::GetSingleton().OnPeerAvailable(event.connectionID);
             }
             break;
@@ -261,8 +287,10 @@ namespace CampfireTogether
                     event.connectionID,
                     event.oldFormID,
                     event.newFormID);
+                MarkPeerObserved(event.connectionID);
                 CampfireSync::GetSingleton().OnPeerAvailable(event.connectionID);
             } else if (event.connectionID != 0) {
+                ForgetPeer(event.connectionID);
                 CampfireSync::GetSingleton().OnPeerUnavailable(event.connectionID);
             }
             break;
@@ -271,10 +299,12 @@ namespace CampfireTogether
                 "CFT STRPM PROXY removed connection={} old={:08X}",
                 event.connectionID,
                 event.oldFormID);
+            ForgetPeer(event.connectionID);
             CampfireSync::GetSingleton().OnPeerUnavailable(event.connectionID);
             break;
         case STRPM::ProxyMappingEventType::kCleared:
             SKSE::log::info("CFT STRPM PROXY mappings cleared");
+            ForgetAllPeers();
             CampfireSync::GetSingleton().OnAllPeersUnavailable();
             break;
         default:
@@ -308,6 +338,8 @@ namespace CampfireTogether
         }
 
         const auto connectionID = message.sender.connectionID;
+        const bool firstObservedPacket = MarkPeerObserved(connectionID);
+
         if (Protocol::IsObjectPacket(packet)) {
             SKSE::log::info(
                 "CFT STRPM RX connection={} type={} event={} snapshot={} base={}:{:08X} cell={}:{:08X}",
@@ -327,7 +359,13 @@ namespace CampfireTogether
                 packet.snapshotID);
         }
 
-        auto dispatch = [connectionID, packet]() {
+        auto dispatch = [connectionID, packet, firstObservedPacket]() {
+            if (firstObservedPacket) {
+                SKSE::log::info(
+                    "CFT STRPM PEER discovered from RX connection={} fallback=1",
+                    connectionID);
+                CampfireSync::GetSingleton().OnPeerAvailable(connectionID);
+            }
             CampfireSync::GetSingleton().HandleRemote(connectionID, packet);
         };
 
