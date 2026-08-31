@@ -276,7 +276,7 @@ namespace CampfireTogether
                     "CFT STRPM PROXY added connection={} proxy={:08X}",
                     event.connectionID,
                     event.newFormID);
-                MarkPeerObserved(event.connectionID);
+                (void)MarkPeerObserved(event.connectionID);
                 CampfireSync::GetSingleton().OnPeerAvailable(event.connectionID);
             }
             break;
@@ -287,7 +287,7 @@ namespace CampfireTogether
                     event.connectionID,
                     event.oldFormID,
                     event.newFormID);
-                MarkPeerObserved(event.connectionID);
+                (void)MarkPeerObserved(event.connectionID);
                 CampfireSync::GetSingleton().OnPeerAvailable(event.connectionID);
             } else if (event.connectionID != 0) {
                 ForgetPeer(event.connectionID);
