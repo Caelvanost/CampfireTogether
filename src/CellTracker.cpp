@@ -27,6 +27,35 @@ namespace CampfireTogether::CellTracker
             }
         };
 
+        class PlayerCellSink final : public RE::BSTEventSink<RE::BGSActorCellEvent>
+        {
+        public:
+            static PlayerCellSink& GetSingleton()
+            {
+                static PlayerCellSink instance;
+                return instance;
+            }
+
+            RE::BSEventNotifyControl ProcessEvent(
+                const RE::BGSActorCellEvent* event,
+                RE::BSTEventSource<RE::BGSActorCellEvent>*) override
+            {
+                if (!event || event->flags != RE::BGSActorCellEvent::CellFlag::kEnter || event->cellID == 0) {
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+
+                auto* cell = RE::TESForm::LookupByID<RE::TESObjectCELL>(event->cellID);
+                if (!cell) {
+                    SKSE::log::debug("CFT PLAYER CELL enter unresolved cell={:08X}", event->cellID);
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+
+                SKSE::log::info("CFT PLAYER CELL enter cell={:08X}", event->cellID);
+                CampfireSync::GetSingleton().OnCellFullyLoaded(cell);
+                return RE::BSEventNotifyControl::kContinue;
+            }
+        };
+
         bool g_registered = false;
     }
 
@@ -37,14 +66,19 @@ namespace CampfireTogether::CellTracker
         }
 
         auto* events = RE::ScriptEventSourceHolder::GetSingleton();
-        if (!events) {
-            SKSE::log::warn("CFT CELL TRACKER unavailable: ScriptEventSourceHolder missing");
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        if (!events || !player) {
+            SKSE::log::warn(
+                "CFT CELL TRACKER unavailable: eventSource={} player={}",
+                events ? 1 : 0,
+                player ? 1 : 0);
             return false;
         }
 
         events->AddEventSink<RE::TESCellFullyLoadedEvent>(&CellFullyLoadedSink::GetSingleton());
+        player->AsBGSActorCellEventSource()->AddEventSink(&PlayerCellSink::GetSingleton());
         g_registered = true;
-        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent");
+        SKSE::log::info("CFT CELL TRACKER READY events=TESCellFullyLoadedEvent,BGSActorCellEvent");
         return true;
     }
 }
