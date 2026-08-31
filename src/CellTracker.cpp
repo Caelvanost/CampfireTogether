@@ -7,6 +7,25 @@ namespace CampfireTogether::CellTracker
 {
     namespace
     {
+        void RetryCellAfterLoad(RE::FormID cellID)
+        {
+            auto* tasks = SKSE::GetTaskInterface();
+            if (!tasks || cellID == 0) {
+                return;
+            }
+
+            tasks->AddTask([cellID]() {
+                auto* cell = RE::TESForm::LookupByID<RE::TESObjectCELL>(cellID);
+                if (!cell) {
+                    SKSE::log::debug("CFT CELL deferred retry unresolved cell={:08X}", cellID);
+                    return;
+                }
+
+                SKSE::log::debug("CFT CELL deferred retry cell={:08X}", cellID);
+                CampfireSync::GetSingleton().OnCellFullyLoaded(cell);
+            });
+        }
+
         class CellFullyLoadedSink final : public RE::BSTEventSink<RE::TESCellFullyLoadedEvent>
         {
         public:
@@ -21,37 +40,10 @@ namespace CampfireTogether::CellTracker
                 RE::BSTEventSource<RE::TESCellFullyLoadedEvent>*) override
             {
                 if (event && event->cell) {
+                    const auto cellID = event->cell->GetFormID();
                     CampfireSync::GetSingleton().OnCellFullyLoaded(event->cell);
+                    RetryCellAfterLoad(cellID);
                 }
-                return RE::BSEventNotifyControl::kContinue;
-            }
-        };
-
-        class PlayerCellSink final : public RE::BSTEventSink<RE::BGSActorCellEvent>
-        {
-        public:
-            static PlayerCellSink& GetSingleton()
-            {
-                static PlayerCellSink instance;
-                return instance;
-            }
-
-            RE::BSEventNotifyControl ProcessEvent(
-                const RE::BGSActorCellEvent* event,
-                RE::BSTEventSource<RE::BGSActorCellEvent>*) override
-            {
-                if (!event || event->flags != RE::BGSActorCellEvent::CellFlag::kEnter || event->cellID == 0) {
-                    return RE::BSEventNotifyControl::kContinue;
-                }
-
-                auto* cell = RE::TESForm::LookupByID<RE::TESObjectCELL>(event->cellID);
-                if (!cell) {
-                    SKSE::log::debug("CFT PLAYER CELL enter unresolved cell={:08X}", event->cellID);
-                    return RE::BSEventNotifyControl::kContinue;
-                }
-
-                SKSE::log::info("CFT PLAYER CELL enter cell={:08X}", event->cellID);
-                CampfireSync::GetSingleton().OnCellFullyLoaded(cell);
                 return RE::BSEventNotifyControl::kContinue;
             }
         };
@@ -66,19 +58,14 @@ namespace CampfireTogether::CellTracker
         }
 
         auto* events = RE::ScriptEventSourceHolder::GetSingleton();
-        auto* player = RE::PlayerCharacter::GetSingleton();
-        if (!events || !player) {
-            SKSE::log::warn(
-                "CFT CELL TRACKER unavailable: eventSource={} player={}",
-                events ? 1 : 0,
-                player ? 1 : 0);
+        if (!events) {
+            SKSE::log::warn("CFT CELL TRACKER unavailable: ScriptEventSourceHolder missing");
             return false;
         }
 
         events->AddEventSink<RE::TESCellFullyLoadedEvent>(&CellFullyLoadedSink::GetSingleton());
-        player->AsBGSActorCellEventSource()->AddEventSink(&PlayerCellSink::GetSingleton());
         g_registered = true;
-        SKSE::log::info("CFT CELL TRACKER READY events=TESCellFullyLoadedEvent,BGSActorCellEvent");
+        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent deferredRetry=1");
         return true;
     }
 }
