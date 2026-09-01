@@ -29,6 +29,29 @@ namespace CampfireTogether
         }
     }
 
+    void CampfireSync::RefreshRemoteExteriorAtPlayer()
+    {
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        auto* tes = RE::TES::GetSingleton();
+        if (!player || !tes) {
+            return;
+        }
+
+        const auto& playerPosition = player->data.location;
+        auto* loadedCell = tes->GetCell(playerPosition);
+        if (!loadedCell || !loadedCell->IsExteriorCell()) {
+            return;
+        }
+
+        SKSE::log::debug(
+            "CFT EXTERIOR GRID refresh-at-player cell={:08X} pos=({:.2f},{:.2f},{:.2f})",
+            loadedCell->GetFormID(),
+            playerPosition.x,
+            playerPosition.y,
+            playerPosition.z);
+        RefreshRemoteExteriorCell(loadedCell);
+    }
+
     void CampfireSync::RefreshRemoteExteriorCell(RE::TESObjectCELL* loadedCell)
     {
         if (!loadedCell || !loadedCell->IsExteriorCell() || !loadedCell->IsAttached()) {
@@ -50,18 +73,17 @@ namespace CampfireTogether
             return;
         }
 
-        auto* playerCell = player->GetParentCell();
-        if (!playerCell || !playerCell->IsExteriorCell()) {
-            return;
-        }
-
-        auto* playerWorld = playerCell->GetRuntimeData().worldSpace;
         const auto& playerPosition = player->data.location;
         const auto playerCellX = WorldToCell(playerPosition.x);
         const auto playerCellY = WorldToCell(playerPosition.y);
 
-        if (playerWorld != loadedWorld ||
-            playerCellX != loadedCoordinates->cellX ||
+        auto* tes = RE::TES::GetSingleton();
+        auto* playerGridCell = tes ? tes->GetCell(playerPosition) : nullptr;
+        if (!playerGridCell || playerGridCell != loadedCell) {
+            return;
+        }
+
+        if (playerCellX != loadedCoordinates->cellX ||
             playerCellY != loadedCoordinates->cellY) {
             return;
         }
@@ -106,7 +128,7 @@ namespace CampfireTogether
         }
 
         SKSE::log::info(
-            "CFT EXTERIOR GRID player-entered cell={:08X} grid=({},{}) candidates={}",
+            "CFT EXTERIOR GRID player-present cell={:08X} grid=({},{}) candidates={}",
             loadedCell->GetFormID(),
             loadedCoordinates->cellX,
             loadedCoordinates->cellY,
