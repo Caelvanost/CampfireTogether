@@ -23,6 +23,7 @@ add_commonlibsse_plugin(${PROJECT_NAME}
         src/LocalBuildIntent.cpp
         src/PapyrusBridge.cpp
         src/Serialization.cpp
+        src/SpatialRetry.cpp
         src/STRPMApi.cpp
         src/STRPMClient.cpp
 )
