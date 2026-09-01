@@ -46,9 +46,16 @@ namespace CampfireTogether
         }
 
         RE::TESObjectREFR* anchor = nullptr;
-        if (auto* player = RE::PlayerCharacter::GetSingleton();
-            player && player->GetParentCell() == loadedCell) {
-            anchor = player;
+        if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+            auto* playerCell = player->GetParentCell();
+            auto* playerWorld = playerCell && playerCell->IsExteriorCell() ?
+                playerCell->GetRuntimeData().worldSpace : nullptr;
+            const auto& playerPosition = player->data.location;
+            if (playerWorld == loadedWorld &&
+                WorldToCell(playerPosition.x) == loadedCoordinates->cellX &&
+                WorldToCell(playerPosition.y) == loadedCoordinates->cellY) {
+                anchor = player;
+            }
         }
 
         if (!anchor) {
