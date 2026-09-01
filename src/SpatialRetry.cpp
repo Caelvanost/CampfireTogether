@@ -45,62 +45,60 @@ namespace CampfireTogether
             return;
         }
 
-        RE::TESObjectREFR* anchor = nullptr;
-        if (auto* player = RE::PlayerCharacter::GetSingleton()) {
-            auto* playerCell = player->GetParentCell();
-            auto* playerWorld = playerCell && playerCell->IsExteriorCell() ?
-                playerCell->GetRuntimeData().worldSpace : nullptr;
-            const auto& playerPosition = player->data.location;
-            if (playerWorld == loadedWorld &&
-                WorldToCell(playerPosition.x) == loadedCoordinates->cellX &&
-                WorldToCell(playerPosition.y) == loadedCoordinates->cellY) {
-                anchor = player;
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        if (!player) {
+            return;
+        }
+
+        auto* playerCell = player->GetParentCell();
+        if (!playerCell || !playerCell->IsExteriorCell()) {
+            return;
+        }
+
+        auto* playerWorld = playerCell->GetRuntimeData().worldSpace;
+        const auto& playerPosition = player->data.location;
+        const auto playerCellX = WorldToCell(playerPosition.x);
+        const auto playerCellY = WorldToCell(playerPosition.y);
+
+        if (playerWorld != loadedWorld ||
+            playerCellX != loadedCoordinates->cellX ||
+            playerCellY != loadedCoordinates->cellY) {
+            return;
+        }
+
+        std::vector<std::pair<RemoteKey, RemotePlacement>> gridCandidates;
+        {
+            std::scoped_lock lock(_mutex);
+            gridCandidates.reserve(_remotePlacements.size());
+            for (const auto& entry : _remotePlacements) {
+                const auto& placement = entry.second;
+                if (WorldToCell(placement.x) == loadedCoordinates->cellX &&
+                    WorldToCell(placement.y) == loadedCoordinates->cellY) {
+                    gridCandidates.emplace_back(entry.first, placement);
+                }
             }
         }
 
-        if (!anchor) {
-            loadedCell->ForEachReference([&anchor](RE::TESObjectREFR& reference) {
-                if (!reference.IsMarkedForDeletion()) {
-                    anchor = std::addressof(reference);
-                    return RE::BSContainer::ForEachResult::kStop;
-                }
-                return RE::BSContainer::ForEachResult::kContinue;
-            });
-        }
-
-        if (!anchor) {
-            SKSE::log::debug(
-                "CFT EXTERIOR GRID pending no anchor grid=({},{}) cell={:08X}",
-                loadedCoordinates->cellX,
-                loadedCoordinates->cellY,
-                loadedCell->GetFormID());
+        if (gridCandidates.empty()) {
             return;
         }
 
         std::vector<std::pair<RemoteKey, RemotePlacement>> candidates;
-        {
-            std::scoped_lock lock(_mutex);
-            candidates.reserve(_remotePlacements.size());
-            for (const auto& entry : _remotePlacements) {
-                const auto& placement = entry.second;
-                if (WorldToCell(placement.x) != loadedCoordinates->cellX ||
-                    WorldToCell(placement.y) != loadedCoordinates->cellY) {
-                    continue;
-                }
-
-                auto* persistentCell = ResolveForm<RE::TESObjectCELL>(
-                    placement.cellPluginName,
-                    placement.cellLocalFormID);
-                if (!persistentCell || !persistentCell->IsExteriorCell()) {
-                    continue;
-                }
-
-                if (persistentCell->GetRuntimeData().worldSpace != loadedWorld) {
-                    continue;
-                }
-
-                candidates.emplace_back(entry.first, placement);
+        candidates.reserve(gridCandidates.size());
+        for (const auto& entry : gridCandidates) {
+            const auto& placement = entry.second;
+            auto* persistentCell = ResolveForm<RE::TESObjectCELL>(
+                placement.cellPluginName,
+                placement.cellLocalFormID);
+            if (!persistentCell || !persistentCell->IsExteriorCell()) {
+                continue;
             }
+
+            if (persistentCell->GetRuntimeData().worldSpace != loadedWorld) {
+                continue;
+            }
+
+            candidates.push_back(entry);
         }
 
         if (candidates.empty()) {
@@ -108,7 +106,7 @@ namespace CampfireTogether
         }
 
         SKSE::log::info(
-            "CFT EXTERIOR GRID loaded cell={:08X} grid=({},{}) candidates={}",
+            "CFT EXTERIOR GRID player-entered cell={:08X} grid=({},{}) candidates={}",
             loadedCell->GetFormID(),
             loadedCoordinates->cellX,
             loadedCoordinates->cellY,
@@ -121,8 +119,7 @@ namespace CampfireTogether
 
             {
                 std::scoped_lock lock(_mutex);
-                const auto stateIt = _remotePlacements.find(key);
-                if (stateIt == _remotePlacements.end()) {
+                if (!_remotePlacements.contains(key)) {
                     continue;
                 }
 
@@ -160,7 +157,7 @@ namespace CampfireTogether
                 continue;
             }
 
-            auto mirror = anchor->PlaceObjectAtMe(base, false);
+            auto mirror = player->PlaceObjectAtMe(base, false);
             if (!mirror) {
                 SKSE::log::warn(
                     "CFT EXTERIOR GRID PlaceObjectAtMe failed connection={} event={}",
