@@ -35,6 +35,7 @@ namespace CampfireTogether
         void OnPeerUnavailable(STRPM::ConnectionID connectionID);
         void OnAllPeersUnavailable();
         void OnCellFullyLoaded(RE::TESObjectCELL* cell);
+        void RefreshRemoteExteriorNearPlayer();
         void BroadcastSnapshot();
 
         [[nodiscard]] bool IsRemoteCampObject(RE::TESObjectREFR* reference) const;
@@ -108,6 +109,7 @@ namespace CampfireTogether
             float y{ 0.0f };
             float z{ 0.0f };
             bool isTent{ false };
+            bool spatiallyValidated{ false };
         };
 
         struct SuppressedRemoval
