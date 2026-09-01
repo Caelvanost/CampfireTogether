@@ -20,7 +20,7 @@ namespace CampfireTogether::CellTracker
             }
         }
 
-        void RetryCellAfterLoad(RE::FormID cellID)
+        void QueueCellAfterLoad(RE::FormID cellID)
         {
             auto* tasks = SKSE::GetTaskInterface();
             if (!tasks || cellID == 0) {
@@ -30,11 +30,11 @@ namespace CampfireTogether::CellTracker
             tasks->AddTask([cellID]() {
                 auto* cell = RE::TESForm::LookupByID<RE::TESObjectCELL>(cellID);
                 if (!cell) {
-                    SKSE::log::debug("CFT CELL deferred retry unresolved cell={:08X}", cellID);
+                    SKSE::log::debug("CFT CELL deferred unresolved cell={:08X}", cellID);
                     return;
                 }
 
-                SKSE::log::debug("CFT CELL deferred retry cell={:08X}", cellID);
+                SKSE::log::debug("CFT CELL deferred process cell={:08X}", cellID);
                 ProcessLoadedCell(cell);
             });
         }
@@ -53,9 +53,10 @@ namespace CampfireTogether::CellTracker
                 RE::BSTEventSource<RE::TESCellFullyLoadedEvent>*) override
             {
                 if (event && event->cell) {
-                    const auto cellID = event->cell->GetFormID();
-                    ProcessLoadedCell(event->cell);
-                    RetryCellAfterLoad(cellID);
+                    // Never create/delete references while Skyrim is dispatching the
+                    // cell-loaded event. Queue the work onto SKSE's task interface so
+                    // streaming can finish first.
+                    QueueCellAfterLoad(event->cell->GetFormID());
                 }
                 return RE::BSEventNotifyControl::kContinue;
             }
@@ -78,7 +79,7 @@ namespace CampfireTogether::CellTracker
 
         events->AddEventSink<RE::TESCellFullyLoadedEvent>(&CellFullyLoadedSink::GetSingleton());
         g_registered = true;
-        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent exteriorGridRetry=1 deferredRetry=1");
+        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent deferredOnly=1 exteriorGridRetry=1");
         return true;
     }
 }
