@@ -36,6 +36,7 @@ namespace CampfireTogether
         void OnAllPeersUnavailable();
         void OnCellFullyLoaded(RE::TESObjectCELL* cell);
         void RefreshRemoteExteriorCell(RE::TESObjectCELL* loadedCell);
+        void RefreshRemoteExteriorAtPlayer();
         void BroadcastSnapshot();
 
         [[nodiscard]] bool IsRemoteCampObject(RE::TESObjectREFR* reference) const;
