@@ -7,6 +7,19 @@ namespace CampfireTogether::CellTracker
 {
     namespace
     {
+        void ProcessLoadedCell(RE::TESObjectCELL* cell)
+        {
+            if (!cell) {
+                return;
+            }
+
+            auto& sync = CampfireSync::GetSingleton();
+            sync.OnCellFullyLoaded(cell);
+            if (cell->IsExteriorCell()) {
+                sync.RefreshRemoteExteriorCell(cell);
+            }
+        }
+
         void RetryCellAfterLoad(RE::FormID cellID)
         {
             auto* tasks = SKSE::GetTaskInterface();
@@ -22,7 +35,7 @@ namespace CampfireTogether::CellTracker
                 }
 
                 SKSE::log::debug("CFT CELL deferred retry cell={:08X}", cellID);
-                CampfireSync::GetSingleton().OnCellFullyLoaded(cell);
+                ProcessLoadedCell(cell);
             });
         }
 
@@ -41,7 +54,7 @@ namespace CampfireTogether::CellTracker
             {
                 if (event && event->cell) {
                     const auto cellID = event->cell->GetFormID();
-                    CampfireSync::GetSingleton().OnCellFullyLoaded(event->cell);
+                    ProcessLoadedCell(event->cell);
                     RetryCellAfterLoad(cellID);
                 }
                 return RE::BSEventNotifyControl::kContinue;
@@ -65,7 +78,7 @@ namespace CampfireTogether::CellTracker
 
         events->AddEventSink<RE::TESCellFullyLoadedEvent>(&CellFullyLoadedSink::GetSingleton());
         g_registered = true;
-        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent deferredRetry=1");
+        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent exteriorGridRetry=1 deferredRetry=1");
         return true;
     }
 }
