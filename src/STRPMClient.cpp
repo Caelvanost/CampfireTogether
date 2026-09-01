@@ -278,6 +278,7 @@ namespace CampfireTogether
                     event.newFormID);
                 (void)MarkPeerObserved(event.connectionID);
                 CampfireSync::GetSingleton().OnPeerAvailable(event.connectionID);
+                CampfireSync::GetSingleton().RefreshRemoteExteriorAtPlayer();
             }
             break;
         case STRPM::ProxyMappingEventType::kUpdated:
@@ -289,23 +290,24 @@ namespace CampfireTogether
                     event.newFormID);
                 (void)MarkPeerObserved(event.connectionID);
                 CampfireSync::GetSingleton().OnPeerAvailable(event.connectionID);
+                CampfireSync::GetSingleton().RefreshRemoteExteriorAtPlayer();
             } else if (event.connectionID != 0) {
                 ForgetPeer(event.connectionID);
-                CampfireSync::GetSingleton().OnPeerUnavailable(event.connectionID);
+                SKSE::log::info(
+                    "CFT STRPM PROXY unavailable connection={} preserving remote camp state",
+                    event.connectionID);
             }
             break;
         case STRPM::ProxyMappingEventType::kRemoved:
             SKSE::log::info(
-                "CFT STRPM PROXY removed connection={} old={:08X}",
+                "CFT STRPM PROXY removed connection={} old={:08X} preserving remote camp state",
                 event.connectionID,
                 event.oldFormID);
             ForgetPeer(event.connectionID);
-            CampfireSync::GetSingleton().OnPeerUnavailable(event.connectionID);
             break;
         case STRPM::ProxyMappingEventType::kCleared:
-            SKSE::log::info("CFT STRPM PROXY mappings cleared");
+            SKSE::log::info("CFT STRPM PROXY mappings cleared; preserving remote camp state");
             ForgetAllPeers();
-            CampfireSync::GetSingleton().OnAllPeersUnavailable();
             break;
         default:
             break;
@@ -360,13 +362,17 @@ namespace CampfireTogether
         }
 
         auto dispatch = [connectionID, packet, firstObservedPacket]() {
+            auto& sync = CampfireSync::GetSingleton();
             if (firstObservedPacket) {
                 SKSE::log::info(
                     "CFT STRPM PEER discovered from RX connection={} fallback=1",
                     connectionID);
-                CampfireSync::GetSingleton().OnPeerAvailable(connectionID);
+                sync.OnPeerAvailable(connectionID);
             }
-            CampfireSync::GetSingleton().HandleRemote(connectionID, packet);
+            sync.HandleRemote(connectionID, packet);
+            if (packet.type == Protocol::PacketType::kPlace) {
+                sync.RefreshRemoteExteriorAtPlayer();
+            }
         };
 
         if (auto* tasks = SKSE::GetTaskInterface()) {
