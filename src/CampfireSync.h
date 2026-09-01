@@ -35,7 +35,7 @@ namespace CampfireTogether
         void OnPeerUnavailable(STRPM::ConnectionID connectionID);
         void OnAllPeersUnavailable();
         void OnCellFullyLoaded(RE::TESObjectCELL* cell);
-        void RefreshRemoteExteriorNearPlayer();
+        void RefreshRemoteExteriorCell(RE::TESObjectCELL* loadedCell);
         void BroadcastSnapshot();
 
         [[nodiscard]] bool IsRemoteCampObject(RE::TESObjectREFR* reference) const;
