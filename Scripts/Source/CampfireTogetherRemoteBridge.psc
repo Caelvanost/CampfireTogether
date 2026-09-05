@@ -2,6 +2,7 @@ Scriptname CampfireTogetherRemoteBridge extends Quest
 
 Event OnInit()
     RegisterRemoteMaterializationEvent()
+    CampfireTogetherNative.BridgeReady()
 EndEvent
 
 Function RegisterRemoteMaterializationEvent()
