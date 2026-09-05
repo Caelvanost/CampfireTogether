@@ -179,7 +179,9 @@ namespace CampfireTogether
                 continue;
             }
 
-            auto mirror = player->PlaceObjectAtMe(base, false);
+            // Remote camps must not depend on a player/proxy remaining in the area.
+            // Force persistence so the reference is fully owned by the local game once created.
+            auto mirror = player->PlaceObjectAtMe(base, true);
             if (!mirror) {
                 SKSE::log::warn(
                     "CFT EXTERIOR GRID PlaceObjectAtMe failed connection={} event={}",
@@ -195,6 +197,11 @@ namespace CampfireTogether
                 RE::deg_to_rad(placement.angleZ)
             };
             mirror->Update3DPosition(true);
+
+            if (!mirror->Is3DLoaded()) {
+                (void)mirror->Load3D(false);
+                mirror->Update3DPosition(true);
+            }
 
             const auto handle = mirror->CreateRefHandle();
             bool duplicate = false;
@@ -227,8 +234,9 @@ namespace CampfireTogether
                 continue;
             }
 
+            auto* mirrorCell = mirror->GetParentCell();
             SKSE::log::info(
-                "CFT EXTERIOR GRID PLACE created connection={} event={} mirror={:08X} grid=({},{}) tent={} pos=({:.2f},{:.2f},{:.2f})",
+                "CFT EXTERIOR GRID PLACE created connection={} event={} mirror={:08X} grid=({},{}) tent={} pos=({:.2f},{:.2f},{:.2f}) parentCell={:08X} expectedCell={:08X} 3dLoaded={} persistent=1",
                 key.sender,
                 key.eventID,
                 mirror->GetFormID(),
@@ -237,7 +245,10 @@ namespace CampfireTogether
                 placement.isTent ? 1 : 0,
                 placement.x,
                 placement.y,
-                placement.z);
+                placement.z,
+                mirrorCell ? mirrorCell->GetFormID() : 0,
+                loadedCell->GetFormID(),
+                mirror->Is3DLoaded() ? 1 : 0);
         }
     }
 }
