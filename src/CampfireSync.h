@@ -41,6 +41,16 @@ namespace CampfireTogether
 
         [[nodiscard]] bool IsRemoteCampObject(RE::TESObjectREFR* reference) const;
 
+        [[nodiscard]] bool IsRemoteMaterializationRequestValid(std::uint32_t requestID) const;
+        [[nodiscard]] float GetRemoteMaterializationX(std::uint32_t requestID) const;
+        [[nodiscard]] float GetRemoteMaterializationY(std::uint32_t requestID) const;
+        [[nodiscard]] float GetRemoteMaterializationZ(std::uint32_t requestID) const;
+        [[nodiscard]] float GetRemoteMaterializationAngleX(std::uint32_t requestID) const;
+        [[nodiscard]] float GetRemoteMaterializationAngleY(std::uint32_t requestID) const;
+        [[nodiscard]] float GetRemoteMaterializationAngleZ(std::uint32_t requestID) const;
+        void CompleteRemoteMaterialization(std::uint32_t requestID, RE::TESObjectREFR* reference);
+        void FailRemoteMaterialization(std::uint32_t requestID);
+
         void SavePersistentState(SKSE::SerializationInterface* serialization) const;
         void LoadPersistentState(SKSE::SerializationInterface* serialization);
         void ClearPersistentState();
@@ -130,6 +140,14 @@ namespace CampfireTogether
             std::unordered_set<std::uint64_t> seenEvents;
         };
 
+        struct RemoteMaterializationRequest
+        {
+            RemoteKey key{};
+            RemotePlacement placement{};
+            RE::FormID expectedCellFormID{ 0 };
+            std::chrono::steady_clock::time_point createdAt{};
+        };
+
         [[nodiscard]] std::optional<LocalPlacement> TakeLocalPlacement(
             std::string_view pluginName,
             RE::FormID localFormID,
@@ -146,17 +164,23 @@ namespace CampfireTogether
         void StoreRemotePlacement(STRPM::ConnectionID sender, const Protocol::Packet& packet);
         void RemoveRemote(STRPM::ConnectionID sender, const Protocol::Packet& packet);
         void TryMaterializeRemote(const RemoteKey& key);
+        void RequestRemoteMaterialization(
+            const RemoteKey& key,
+            const RemotePlacement& placement,
+            RE::TESObjectCELL* expectedCell);
         void TeardownMirror(const RemoteMirror& mirror);
         static bool DispatchTakeDown(RE::ObjectRefHandle handle, const char* scriptName);
         static void DeleteMirror(RE::ObjectRefHandle handle);
 
         std::atomic<std::uint64_t> _nextEventID{ 1 };
         std::atomic<std::uint64_t> _nextSnapshotID{ 1 };
+        std::atomic<std::uint32_t> _nextRemoteMaterializationRequestID{ 1 };
         mutable std::mutex _mutex;
         std::deque<LocalPlacement> _localPlacements;
         std::unordered_map<RemoteKey, RemotePlacement, RemoteKeyHash> _remotePlacements;
         std::unordered_map<RemoteKey, RemoteMirror, RemoteKeyHash> _remoteMirrors;
         std::unordered_map<STRPM::ConnectionID, RemoteSnapshotState> _remoteSnapshots;
+        std::unordered_map<std::uint32_t, RemoteMaterializationRequest> _remoteMaterializationRequests;
         std::deque<SuppressedRemoval> _suppressedRemovals;
     };
 }
