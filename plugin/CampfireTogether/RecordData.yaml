@@ -8,8 +8,8 @@ ModHeader:
   - Small
   Stats:
     Version: 1.7
-    NumRecords: 1
-    NextFormID: 2049
+    NumRecords: 2
+    NextFormID: 2050
   Author: Caelvanost
   Description: Campfire Together bridge plugin
   MasterReferences:
