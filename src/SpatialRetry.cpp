@@ -6,6 +6,8 @@ namespace CampfireTogether
     namespace
     {
         constexpr float kExteriorCellSize = 4096.0f;
+        constexpr auto kRemoteMaterializationTimeout = std::chrono::seconds(10);
+        constexpr char kRemoteMaterializeEvent[] = "CFT_RemoteMaterialize";
 
         [[nodiscard]] std::int32_t WorldToCell(float value)
         {
@@ -163,92 +165,287 @@ namespace CampfireTogether
             if (hadPrevious && previous.handle.get()) {
                 DeleteMirror(previous.handle);
                 SKSE::log::debug(
-                    "CFT EXTERIOR GRID replaced premature mirror connection={} event={}",
+                    "CFT EXTERIOR GRID removed legacy/premature mirror connection={} event={}",
                     key.sender,
                     key.eventID);
             }
 
-            auto* base = ResolveForm<RE::TESBoundObject>(placement.pluginName, placement.localFormID);
-            if (!base) {
-                SKSE::log::warn(
-                    "CFT EXTERIOR GRID failed unresolved base connection={} event={} base={}:{:08X}",
-                    key.sender,
-                    key.eventID,
-                    placement.pluginName,
-                    placement.localFormID);
-                continue;
+            RequestRemoteMaterialization(key, placement, loadedCell);
+        }
+    }
+
+    void CampfireSync::RequestRemoteMaterialization(
+        const RemoteKey& key,
+        const RemotePlacement& placement,
+        RE::TESObjectCELL* expectedCell)
+    {
+        if (!expectedCell || !expectedCell->IsExteriorCell()) {
+            return;
+        }
+
+        auto* base = ResolveForm<RE::TESBoundObject>(placement.pluginName, placement.localFormID);
+        if (!base) {
+            SKSE::log::warn(
+                "CFT PAPYRUS MATERIALIZE request failed unresolved base connection={} event={} base={}:{:08X}",
+                key.sender,
+                key.eventID,
+                placement.pluginName,
+                placement.localFormID);
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        std::uint32_t requestID = 0;
+        {
+            std::scoped_lock lock(_mutex);
+
+            if (!_remotePlacements.contains(key)) {
+                return;
             }
 
-            // Remote camps must not depend on a player/proxy remaining in the area.
-            // Force persistence so the reference is fully owned by the local game once created.
-            auto mirror = player->PlaceObjectAtMe(base, true);
-            if (!mirror) {
-                SKSE::log::warn(
-                    "CFT EXTERIOR GRID PlaceObjectAtMe failed connection={} event={}",
-                    key.sender,
-                    key.eventID);
-                continue;
+            if (const auto mirrorIt = _remoteMirrors.find(key);
+                mirrorIt != _remoteMirrors.end() && mirrorIt->second.handle.get() && mirrorIt->second.spatiallyValidated) {
+                return;
             }
 
-            mirror->SetPosition(placement.x, placement.y, placement.z);
-            mirror->data.angle = {
-                RE::deg_to_rad(placement.angleX),
-                RE::deg_to_rad(placement.angleY),
-                RE::deg_to_rad(placement.angleZ)
-            };
-            mirror->Update3DPosition(true);
-
-            if (!mirror->Is3DLoaded()) {
-                (void)mirror->Load3D(false);
-                mirror->Update3DPosition(true);
-            }
-
-            const auto handle = mirror->CreateRefHandle();
-            bool duplicate = false;
-            {
-                std::scoped_lock lock(_mutex);
-                if (!_remotePlacements.contains(key)) {
-                    duplicate = true;
-                } else if (const auto existing = _remoteMirrors.find(key);
-                           existing != _remoteMirrors.end() && existing->second.handle.get()) {
-                    duplicate = true;
+            for (auto it = _remoteMaterializationRequests.begin(); it != _remoteMaterializationRequests.end();) {
+                if (now - it->second.createdAt >= kRemoteMaterializationTimeout) {
+                    SKSE::log::warn(
+                        "CFT PAPYRUS MATERIALIZE request expired request={} connection={} event={}",
+                        it->first,
+                        it->second.key.sender,
+                        it->second.key.eventID);
+                    it = _remoteMaterializationRequests.erase(it);
                 } else {
-                    _remoteMirrors.insert_or_assign(key, RemoteMirror{
-                        handle,
-                        base->GetFormID(),
-                        placement.pluginName,
-                        placement.localFormID,
-                        placement.cellPluginName,
-                        placement.cellLocalFormID,
-                        placement.x,
-                        placement.y,
-                        placement.z,
-                        placement.isTent,
-                        true
-                    });
+                    ++it;
                 }
             }
 
-            if (duplicate) {
-                DeleteMirror(handle);
-                continue;
+            for (const auto& entry : _remoteMaterializationRequests) {
+                if (entry.second.key == key) {
+                    return;
+                }
             }
 
-            auto* mirrorCell = mirror->GetParentCell();
-            SKSE::log::info(
-                "CFT EXTERIOR GRID PLACE created connection={} event={} mirror={:08X} grid=({},{}) tent={} pos=({:.2f},{:.2f},{:.2f}) parentCell={:08X} expectedCell={:08X} 3dLoaded={} persistent=1",
+            requestID = _nextRemoteMaterializationRequestID.fetch_add(1);
+            if (requestID == 0 || requestID > 8000000) {
+                _nextRemoteMaterializationRequestID.store(2);
+                requestID = 1;
+            }
+
+            _remoteMaterializationRequests.insert_or_assign(
+                requestID,
+                RemoteMaterializationRequest{
+                    key,
+                    placement,
+                    expectedCell->GetFormID(),
+                    now
+                });
+        }
+
+        auto* source = SKSE::GetModCallbackEventSource();
+        if (!source) {
+            {
+                std::scoped_lock lock(_mutex);
+                _remoteMaterializationRequests.erase(requestID);
+            }
+            SKSE::log::warn(
+                "CFT PAPYRUS MATERIALIZE request failed no ModCallbackEvent source request={} connection={} event={}",
+                requestID,
                 key.sender,
-                key.eventID,
-                mirror->GetFormID(),
-                loadedCoordinates->cellX,
-                loadedCoordinates->cellY,
-                placement.isTent ? 1 : 0,
-                placement.x,
-                placement.y,
-                placement.z,
-                mirrorCell ? mirrorCell->GetFormID() : 0,
-                loadedCell->GetFormID(),
-                mirror->Is3DLoaded() ? 1 : 0);
+                key.eventID);
+            return;
+        }
+
+        const SKSE::ModCallbackEvent event{
+            kRemoteMaterializeEvent,
+            {},
+            static_cast<float>(requestID),
+            base
+        };
+        source->SendEvent(&event);
+
+        SKSE::log::info(
+            "CFT PAPYRUS MATERIALIZE request={} connection={} event={} base={}:{:08X} expectedCell={:08X} pos=({:.2f},{:.2f},{:.2f})",
+            requestID,
+            key.sender,
+            key.eventID,
+            placement.pluginName,
+            placement.localFormID,
+            expectedCell->GetFormID(),
+            placement.x,
+            placement.y,
+            placement.z);
+    }
+
+    bool CampfireSync::IsRemoteMaterializationRequestValid(std::uint32_t requestID) const
+    {
+        if (requestID == 0) {
+            return false;
+        }
+        std::scoped_lock lock(_mutex);
+        return _remoteMaterializationRequests.contains(requestID);
+    }
+
+    float CampfireSync::GetRemoteMaterializationX(std::uint32_t requestID) const
+    {
+        std::scoped_lock lock(_mutex);
+        const auto it = _remoteMaterializationRequests.find(requestID);
+        return it != _remoteMaterializationRequests.end() ? it->second.placement.x : 0.0f;
+    }
+
+    float CampfireSync::GetRemoteMaterializationY(std::uint32_t requestID) const
+    {
+        std::scoped_lock lock(_mutex);
+        const auto it = _remoteMaterializationRequests.find(requestID);
+        return it != _remoteMaterializationRequests.end() ? it->second.placement.y : 0.0f;
+    }
+
+    float CampfireSync::GetRemoteMaterializationZ(std::uint32_t requestID) const
+    {
+        std::scoped_lock lock(_mutex);
+        const auto it = _remoteMaterializationRequests.find(requestID);
+        return it != _remoteMaterializationRequests.end() ? it->second.placement.z : 0.0f;
+    }
+
+    float CampfireSync::GetRemoteMaterializationAngleX(std::uint32_t requestID) const
+    {
+        std::scoped_lock lock(_mutex);
+        const auto it = _remoteMaterializationRequests.find(requestID);
+        return it != _remoteMaterializationRequests.end() ? it->second.placement.angleX : 0.0f;
+    }
+
+    float CampfireSync::GetRemoteMaterializationAngleY(std::uint32_t requestID) const
+    {
+        std::scoped_lock lock(_mutex);
+        const auto it = _remoteMaterializationRequests.find(requestID);
+        return it != _remoteMaterializationRequests.end() ? it->second.placement.angleY : 0.0f;
+    }
+
+    float CampfireSync::GetRemoteMaterializationAngleZ(std::uint32_t requestID) const
+    {
+        std::scoped_lock lock(_mutex);
+        const auto it = _remoteMaterializationRequests.find(requestID);
+        return it != _remoteMaterializationRequests.end() ? it->second.placement.angleZ : 0.0f;
+    }
+
+    void CampfireSync::CompleteRemoteMaterialization(
+        std::uint32_t requestID,
+        RE::TESObjectREFR* reference)
+    {
+        RemoteMaterializationRequest request{};
+        bool found = false;
+        {
+            std::scoped_lock lock(_mutex);
+            const auto it = _remoteMaterializationRequests.find(requestID);
+            if (it != _remoteMaterializationRequests.end()) {
+                request = it->second;
+                _remoteMaterializationRequests.erase(it);
+                found = true;
+            }
+        }
+
+        if (!found) {
+            if (reference) {
+                DeleteMirror(reference->CreateRefHandle());
+            }
+            SKSE::log::warn("CFT PAPYRUS MATERIALIZE completion ignored unknown request={}", requestID);
+            return;
+        }
+
+        if (!reference) {
+            SKSE::log::warn(
+                "CFT PAPYRUS MATERIALIZE completion missing reference request={} connection={} event={}",
+                requestID,
+                request.key.sender,
+                request.key.eventID);
+            return;
+        }
+
+        auto* expectedCell = RE::TESForm::LookupByID<RE::TESObjectCELL>(request.expectedCellFormID);
+        auto* actualCell = reference->GetParentCell();
+        auto* expectedBase = ResolveForm<RE::TESBoundObject>(
+            request.placement.pluginName,
+            request.placement.localFormID);
+        auto* actualBase = reference->GetBaseObject();
+
+        if (!expectedCell || actualCell != expectedCell || !expectedBase || actualBase != expectedBase) {
+            SKSE::log::warn(
+                "CFT PAPYRUS MATERIALIZE rejected request={} connection={} event={} ref={:08X} parentCell={:08X} expectedCell={:08X} actualBase={:08X} expectedBase={:08X}",
+                requestID,
+                request.key.sender,
+                request.key.eventID,
+                reference->GetFormID(),
+                actualCell ? actualCell->GetFormID() : 0,
+                expectedCell ? expectedCell->GetFormID() : 0,
+                actualBase ? actualBase->GetFormID() : 0,
+                expectedBase ? expectedBase->GetFormID() : 0);
+            DeleteMirror(reference->CreateRefHandle());
+            return;
+        }
+
+        const auto handle = reference->CreateRefHandle();
+        bool duplicate = false;
+        {
+            std::scoped_lock lock(_mutex);
+            if (!_remotePlacements.contains(request.key)) {
+                duplicate = true;
+            } else if (const auto existing = _remoteMirrors.find(request.key);
+                       existing != _remoteMirrors.end() && existing->second.handle.get()) {
+                duplicate = true;
+            } else {
+                _remoteMirrors.insert_or_assign(request.key, RemoteMirror{
+                    handle,
+                    expectedBase->GetFormID(),
+                    request.placement.pluginName,
+                    request.placement.localFormID,
+                    request.placement.cellPluginName,
+                    request.placement.cellLocalFormID,
+                    request.placement.x,
+                    request.placement.y,
+                    request.placement.z,
+                    request.placement.isTent,
+                    true
+                });
+            }
+        }
+
+        if (duplicate) {
+            DeleteMirror(handle);
+            return;
+        }
+
+        SKSE::log::info(
+            "CFT PAPYRUS MATERIALIZE complete request={} connection={} event={} ref={:08X} parentCell={:08X} 3dLoaded={} tent={}",
+            requestID,
+            request.key.sender,
+            request.key.eventID,
+            reference->GetFormID(),
+            actualCell->GetFormID(),
+            reference->Is3DLoaded() ? 1 : 0,
+            request.placement.isTent ? 1 : 0);
+    }
+
+    void CampfireSync::FailRemoteMaterialization(std::uint32_t requestID)
+    {
+        RemoteMaterializationRequest request{};
+        bool found = false;
+        {
+            std::scoped_lock lock(_mutex);
+            const auto it = _remoteMaterializationRequests.find(requestID);
+            if (it != _remoteMaterializationRequests.end()) {
+                request = it->second;
+                _remoteMaterializationRequests.erase(it);
+                found = true;
+            }
+        }
+
+        if (found) {
+            SKSE::log::warn(
+                "CFT PAPYRUS MATERIALIZE failed request={} connection={} event={}",
+                requestID,
+                request.key.sender,
+                request.key.eventID);
         }
     }
 }
