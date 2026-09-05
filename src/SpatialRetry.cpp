@@ -163,9 +163,9 @@ namespace CampfireTogether
             }
 
             if (hadPrevious && previous.handle.get()) {
-                DeleteMirror(previous.handle);
+                TeardownMirror(previous);
                 SKSE::log::debug(
-                    "CFT EXTERIOR GRID removed legacy/premature mirror connection={} event={}",
+                    "CFT EXTERIOR GRID tore down legacy/premature mirror connection={} event={}",
                     key.sender,
                     key.eventID);
             }
