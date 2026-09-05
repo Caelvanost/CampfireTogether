@@ -1,0 +1,14 @@
+FormKey: 000801:CampfireTogether.esp
+EditorID: CFT_RemoteBridgeQuest
+VirtualMachineAdapter:
+  Scripts:
+  - Name: CampfireTogetherRemoteBridge
+    FileName: ''
+Name:
+  TargetLanguage: English
+  Value: Campfire Together Remote Bridge
+Flags:
+- StartGameEnabled
+Type: SideQuest
+NextAliasID: 0
+Aliases: []
