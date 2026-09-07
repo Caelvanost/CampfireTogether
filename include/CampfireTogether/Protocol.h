@@ -6,23 +6,23 @@
 namespace CampfireTogether::Protocol
 {
     inline constexpr std::uint32_t kMagic = 0x31544643;  // "CFT1"
-    inline constexpr std::uint16_t kVersion = 3;
+    inline constexpr std::uint16_t kVersion = 4;
     inline constexpr std::uint32_t kPluginNameCapacity = 260;
 
     enum class PacketType : std::uint8_t
     {
-        kPlace = 1,
-        kRemove = 2,
-        kSnapshotRequest = 3,
-        kSnapshotBegin = 4,
-        kSnapshotEnd = 5
+        kState = 1,
+        kSnapshotRequest = 2,
+        kSnapshotBegin = 3,
+        kSnapshotEnd = 4
     };
 
     enum PacketFlags : std::uint8_t
     {
         kNone = 0,
         kTent = 1u << 0,
-        kSnapshot = 1u << 1
+        kSnapshot = 1u << 1,
+        kDeleted = 1u << 2
     };
 
 #pragma pack(push, 1)
@@ -30,9 +30,12 @@ namespace CampfireTogether::Protocol
     {
         std::uint32_t magic{ kMagic };
         std::uint16_t version{ kVersion };
-        PacketType type{ PacketType::kPlace };
+        PacketType type{ PacketType::kState };
         std::uint8_t flags{ kNone };
-        std::uint64_t eventID{ 0 };
+        std::uint64_t originNodeID{ 0 };
+        std::uint64_t objectID{ 0 };
+        std::uint64_t revision{ 0 };
+        std::uint64_t writerNodeID{ 0 };
         std::uint64_t snapshotID{ 0 };
         std::uint32_t baseLocalFormID{ 0 };
         char basePluginName[kPluginNameCapacity]{};
@@ -47,12 +50,12 @@ namespace CampfireTogether::Protocol
     };
 #pragma pack(pop)
 
-    static_assert(sizeof(Packet) == 576);
+    static_assert(sizeof(Packet) == 600);
     static_assert(std::is_trivially_copyable_v<Packet>);
 
     [[nodiscard]] inline bool IsObjectPacket(const Packet& packet) noexcept
     {
-        return packet.type == PacketType::kPlace || packet.type == PacketType::kRemove;
+        return packet.type == PacketType::kState;
     }
 
     [[nodiscard]] inline bool IsControlPacket(const Packet& packet) noexcept
@@ -78,20 +81,18 @@ namespace CampfireTogether::Protocol
         }
 
         if (IsObjectPacket(packet)) {
-            if (!HasValidIdentity(packet.baseLocalFormID, packet.basePluginName) ||
+            if (packet.originNodeID == 0 ||
+                packet.objectID == 0 ||
+                packet.revision == 0 ||
+                packet.writerNodeID == 0 ||
+                !HasValidIdentity(packet.baseLocalFormID, packet.basePluginName) ||
                 !HasValidIdentity(packet.cellLocalFormID, packet.cellPluginName)) {
                 return false;
             }
 
-            if (packet.type == PacketType::kPlace && packet.eventID == 0) {
+            if ((packet.flags & kSnapshot) != 0 && packet.snapshotID == 0) {
                 return false;
             }
-
-            if ((packet.flags & kSnapshot) != 0 &&
-                (packet.snapshotID == 0 || packet.eventID == 0)) {
-                return false;
-            }
-
             return true;
         }
 
