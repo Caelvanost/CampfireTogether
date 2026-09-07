@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "Serialization.h"
 
-#include "CampfireSync.h"
+#include "SharedCampSync.h"
 
 namespace CampfireTogether::Serialization
 {
@@ -11,17 +11,17 @@ namespace CampfireTogether::Serialization
 
         void OnSave(SKSE::SerializationInterface* serialization)
         {
-            CampfireSync::GetSingleton().SavePersistentState(serialization);
+            SharedCampSync::GetSingleton().SavePersistentState(serialization);
         }
 
         void OnLoad(SKSE::SerializationInterface* serialization)
         {
-            CampfireSync::GetSingleton().LoadPersistentState(serialization);
+            SharedCampSync::GetSingleton().LoadPersistentState(serialization);
         }
 
         void OnRevert(SKSE::SerializationInterface*)
         {
-            CampfireSync::GetSingleton().ClearPersistentState();
+            SharedCampSync::GetSingleton().ClearPersistentState();
         }
     }
 
@@ -38,7 +38,7 @@ namespace CampfireTogether::Serialization
         serialization->SetLoadCallback(OnLoad);
         serialization->SetRevertCallback(OnRevert);
 
-        SKSE::log::info("CFT SERIALIZATION READY id=CFT2");
+        SKSE::log::info("CFT SERIALIZATION READY id=CFT2 sharedRegistry=1 recordVersion=3");
         return true;
     }
 }
