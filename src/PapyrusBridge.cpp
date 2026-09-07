@@ -1,8 +1,8 @@
 #include "PCH.h"
 #include "PapyrusBridge.h"
 
-#include "CampfireSync.h"
 #include "LocalBuildIntent.h"
+#include "SharedCampSync.h"
 
 namespace CampfireTogether::PapyrusBridge
 {
@@ -24,7 +24,7 @@ namespace CampfireTogether::PapyrusBridge
             float angleZ,
             bool isTent)
         {
-            CampfireSync::GetSingleton().OnLocalPlaced(
+            SharedCampSync::GetSingleton().OnLocalPlaced(
                 placedRef,
                 positionX,
                 positionY,
@@ -46,7 +46,7 @@ namespace CampfireTogether::PapyrusBridge
             float angleZ,
             bool isTent)
         {
-            CampfireSync::GetSingleton().OnLocalRemoved(
+            SharedCampSync::GetSingleton().OnLocalRemoved(
                 baseForm,
                 positionX,
                 positionY,
@@ -59,42 +59,42 @@ namespace CampfireTogether::PapyrusBridge
 
         bool IsRemoteCampObject(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
         {
-            return CampfireSync::GetSingleton().IsRemoteCampObject(reference);
+            return SharedCampSync::GetSingleton().IsRemoteCampObject(reference);
         }
 
         bool IsRemoteMaterializationRequestValid(RE::StaticFunctionTag*, std::int32_t requestID)
         {
-            return CampfireSync::GetSingleton().IsRemoteMaterializationRequestValid(RequestID(requestID));
+            return SharedCampSync::GetSingleton().IsRemoteMaterializationRequestValid(RequestID(requestID));
         }
 
         float GetRemoteMaterializationX(RE::StaticFunctionTag*, std::int32_t requestID)
         {
-            return CampfireSync::GetSingleton().GetRemoteMaterializationX(RequestID(requestID));
+            return SharedCampSync::GetSingleton().GetRemoteMaterializationX(RequestID(requestID));
         }
 
         float GetRemoteMaterializationY(RE::StaticFunctionTag*, std::int32_t requestID)
         {
-            return CampfireSync::GetSingleton().GetRemoteMaterializationY(RequestID(requestID));
+            return SharedCampSync::GetSingleton().GetRemoteMaterializationY(RequestID(requestID));
         }
 
         float GetRemoteMaterializationZ(RE::StaticFunctionTag*, std::int32_t requestID)
         {
-            return CampfireSync::GetSingleton().GetRemoteMaterializationZ(RequestID(requestID));
+            return SharedCampSync::GetSingleton().GetRemoteMaterializationZ(RequestID(requestID));
         }
 
         float GetRemoteMaterializationAngleX(RE::StaticFunctionTag*, std::int32_t requestID)
         {
-            return CampfireSync::GetSingleton().GetRemoteMaterializationAngleX(RequestID(requestID));
+            return SharedCampSync::GetSingleton().GetRemoteMaterializationAngleX(RequestID(requestID));
         }
 
         float GetRemoteMaterializationAngleY(RE::StaticFunctionTag*, std::int32_t requestID)
         {
-            return CampfireSync::GetSingleton().GetRemoteMaterializationAngleY(RequestID(requestID));
+            return SharedCampSync::GetSingleton().GetRemoteMaterializationAngleY(RequestID(requestID));
         }
 
         float GetRemoteMaterializationAngleZ(RE::StaticFunctionTag*, std::int32_t requestID)
         {
-            return CampfireSync::GetSingleton().GetRemoteMaterializationAngleZ(RequestID(requestID));
+            return SharedCampSync::GetSingleton().GetRemoteMaterializationAngleZ(RequestID(requestID));
         }
 
         void ReportRemoteMaterialized(
@@ -102,12 +102,12 @@ namespace CampfireTogether::PapyrusBridge
             std::int32_t requestID,
             RE::TESObjectREFR* reference)
         {
-            CampfireSync::GetSingleton().CompleteRemoteMaterialization(RequestID(requestID), reference);
+            SharedCampSync::GetSingleton().CompleteRemoteMaterialization(RequestID(requestID), reference);
         }
 
         void ReportRemoteMaterializationFailed(RE::StaticFunctionTag*, std::int32_t requestID)
         {
-            CampfireSync::GetSingleton().FailRemoteMaterialization(RequestID(requestID));
+            SharedCampSync::GetSingleton().FailRemoteMaterialization(RequestID(requestID));
         }
 
         bool ConsumeLocalBuildIntent(RE::StaticFunctionTag*)
@@ -133,7 +133,7 @@ namespace CampfireTogether::PapyrusBridge
 
         void BridgeReady(RE::StaticFunctionTag*)
         {
-            SKSE::log::info("CFT PAPYRUS Campfire event listener READY remoteMaterialization=1");
+            SKSE::log::info("CFT PAPYRUS Campfire event listener READY sharedRegistry=1");
         }
     }
 
@@ -160,7 +160,7 @@ namespace CampfireTogether::PapyrusBridge
         vm->RegisterFunction("ReportRemoteBedrollAccess", "CampfireTogetherNative", ReportRemoteBedrollAccess);
         vm->RegisterFunction("BridgeReady", "CampfireTogetherNative", BridgeReady);
 
-        SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative remoteMaterialization=1");
+        SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative sharedRegistry=1");
         return true;
     }
 }
