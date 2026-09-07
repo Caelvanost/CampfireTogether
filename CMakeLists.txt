@@ -18,12 +18,11 @@ find_package(CommonLibSSE CONFIG REQUIRED)
 add_commonlibsse_plugin(${PROJECT_NAME}
     SOURCES
         src/main.cpp
-        src/CampfireSync.cpp
         src/CellTracker.cpp
         src/LocalBuildIntent.cpp
         src/PapyrusBridge.cpp
         src/Serialization.cpp
-        src/SpatialRetry.cpp
+        src/SharedCampSync.cpp
         src/STRPMApi.cpp
         src/STRPMClient.cpp
 )
