@@ -149,6 +149,16 @@ namespace CampfireTogether
                    y < coordinates->worldY + 4096.0f;
         }
 
+        [[nodiscard]] bool IsPersistentExteriorCell(RE::TESObjectCELL* cell)
+        {
+            if (!cell || !cell->IsExteriorCell()) {
+                return false;
+            }
+
+            auto* world = cell->GetRuntimeData().worldSpace;
+            return world && world->persistentCell == cell;
+        }
+
         [[nodiscard]] std::uint64_t GenerateNodeID()
         {
             std::random_device random;
@@ -701,8 +711,8 @@ namespace CampfireTogether
                 continue;
             }
 
-            if (cell == recordedCell) {
-                return cell;
+            if (IsPersistentExteriorCell(cell)) {
+                continue;
             }
 
             if (expectedWorld && cell->GetRuntimeData().worldSpace != expectedWorld) {
@@ -710,6 +720,12 @@ namespace CampfireTogether
             }
 
             if (PositionInsideCell(cell->GetCoordinates(), record.x, record.y)) {
+                SKSE::log::debug(
+                    "CFT SHARED GRID resolved originCell={:08X} runtimeCell={:08X} pos=({:.2f},{:.2f})",
+                    recordedCell->GetFormID(),
+                    cell->GetFormID(),
+                    record.x,
+                    record.y);
                 return cell;
             }
         }
@@ -718,7 +734,7 @@ namespace CampfireTogether
 
     RE::TESObjectREFR* SharedCampSync::FindAnchor(RE::TESObjectCELL* cell) const
     {
-        if (!cell || !cell->IsAttached()) {
+        if (!cell || !cell->IsAttached() || IsPersistentExteriorCell(cell)) {
             return nullptr;
         }
 
@@ -742,7 +758,7 @@ namespace CampfireTogether
         RE::TESObjectCELL* cell,
         const CampRecord& record) const
     {
-        if (!cell || !cell->IsAttached()) {
+        if (!cell || !cell->IsAttached() || IsPersistentExteriorCell(cell)) {
             return nullptr;
         }
 
@@ -833,7 +849,7 @@ namespace CampfireTogether
                 return;
             }
 
-            if (physical->GetParentCell() != targetCell) {
+            if (physical->GetParentCell() != targetCell || IsPersistentExteriorCell(physical->GetParentCell())) {
                 SKSE::log::warn(
                     "CFT SHARED MATERIALIZE rejected wrong parent origin={:016X} object={} ref={:08X} parent={:08X} expected={:08X}",
                     id.originNodeID,
@@ -942,9 +958,14 @@ namespace CampfireTogether
             return;
         }
 
-        if (cell->IsExteriorCell()) {
+        const bool persistentExterior = IsPersistentExteriorCell(cell);
+        if (cell->IsExteriorCell() && !persistentExterior) {
             std::scoped_lock lock(_mutex);
             _loadedExteriorCells.insert(cell->GetFormID());
+        } else if (persistentExterior) {
+            SKSE::log::debug(
+                "CFT SHARED CELL ignored persistent exterior cell={:08X}",
+                cell->GetFormID());
         }
 
         const auto cellIdentity = DescribeForm(cell);
@@ -961,11 +982,12 @@ namespace CampfireTogether
                 }
 
                 bool match = false;
-                if (cellIdentity &&
+                if (cell->IsInteriorCell() &&
+                    cellIdentity &&
                     record.cellLocalFormID == cellIdentity->localFormID &&
                     record.cellPluginName == cellIdentity->pluginName) {
                     match = true;
-                } else if (cell->IsExteriorCell() && coordinates) {
+                } else if (cell->IsExteriorCell() && !persistentExterior && coordinates) {
                     auto* recordedCell = ResolveForm<RE::TESObjectCELL>(
                         record.cellPluginName,
                         record.cellLocalFormID);
