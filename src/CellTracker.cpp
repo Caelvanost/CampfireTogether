@@ -1,25 +1,12 @@
 #include "PCH.h"
 #include "CellTracker.h"
 
-#include "CampfireSync.h"
+#include "SharedCampSync.h"
 
 namespace CampfireTogether::CellTracker
 {
     namespace
     {
-        void ProcessLoadedCell(RE::TESObjectCELL* cell)
-        {
-            if (!cell) {
-                return;
-            }
-
-            auto& sync = CampfireSync::GetSingleton();
-            sync.OnCellFullyLoaded(cell);
-            if (cell->IsExteriorCell()) {
-                sync.RefreshRemoteExteriorCell(cell);
-            }
-        }
-
         void QueueCellAfterLoad(RE::FormID cellID)
         {
             auto* tasks = SKSE::GetTaskInterface();
@@ -35,7 +22,7 @@ namespace CampfireTogether::CellTracker
                 }
 
                 SKSE::log::debug("CFT CELL deferred process cell={:08X}", cellID);
-                ProcessLoadedCell(cell);
+                SharedCampSync::GetSingleton().OnCellFullyLoaded(cell);
             });
         }
 
@@ -53,9 +40,6 @@ namespace CampfireTogether::CellTracker
                 RE::BSTEventSource<RE::TESCellFullyLoadedEvent>*) override
             {
                 if (event && event->cell) {
-                    // Never create/delete references while Skyrim is dispatching the
-                    // cell-loaded event. Queue the work onto SKSE's task interface so
-                    // streaming can finish first.
                     QueueCellAfterLoad(event->cell->GetFormID());
                 }
                 return RE::BSEventNotifyControl::kContinue;
@@ -79,7 +63,7 @@ namespace CampfireTogether::CellTracker
 
         events->AddEventSink<RE::TESCellFullyLoadedEvent>(&CellFullyLoadedSink::GetSingleton());
         g_registered = true;
-        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent deferredOnly=1 exteriorGridRetry=1");
+        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent sharedRegistry=1 deferredOnly=1");
         return true;
     }
 }
