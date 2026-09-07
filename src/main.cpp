@@ -66,7 +66,9 @@ namespace
             CampfireTogether::LocalBuildIntent::Reset();
             break;
         case SKSE::MessagingInterface::kPostLoadGame:
-            CampfireTogether::SharedCampSync::GetSingleton().ResetRuntimeState();
+            // Serialization load already replaced the shared registry and cleared stale
+            // runtime handles. Do not clear the exterior-cell cache here: cell-loaded
+            // events may already have arrived between deserialization and post-load.
             CampfireTogether::LocalBuildIntent::Reset();
             InitializeRuntime("post-load-game");
             ExchangeState("post-load-game");
