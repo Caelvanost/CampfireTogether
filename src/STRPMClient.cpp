@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "STRPMClient.h"
 
-#include "CampfireSync.h"
+#include "SharedCampSync.h"
 
 namespace CampfireTogether
 {
@@ -59,9 +59,10 @@ namespace CampfireTogether
         }
 
         SKSE::log::info(
-            "CFT STRPM READY channel={} apiVersion={} proxyResolver={} proxyListener={}",
+            "CFT STRPM READY channel={} apiVersion={} protocol={} sharedRegistry=1 proxyResolver={} proxyListener={}",
             kChannel,
             _api->version,
+            Protocol::kVersion,
             _resolver ? 1 : 0,
             _proxyListenerRegistered ? 1 : 0);
         return true;
@@ -81,6 +82,7 @@ namespace CampfireTogether
         _resolver = nullptr;
         _api = nullptr;
         ForgetAllPeers();
+        SharedCampSync::GetSingleton().OnAllPeersUnavailable();
     }
 
     bool STRPMClient::Send(const Protocol::Packet& packet) const
@@ -126,16 +128,15 @@ namespace CampfireTogether
                     packet.snapshotID);
             } else if (Protocol::IsObjectPacket(packet)) {
                 SKSE::log::warn(
-                    "CFT STRPM TX failed result={} target={} type={} event={} snapshot={} base={}:{:08X} cell={}:{:08X}",
+                    "CFT STRPM TX failed result={} target={} origin={:016X} object={} rev={} writer={:016X} snapshot={} deleted={}",
                     STRPM::ResultToString(result),
                     target.connectionID,
-                    static_cast<unsigned>(packet.type),
-                    packet.eventID,
+                    packet.originNodeID,
+                    packet.objectID,
+                    packet.revision,
+                    packet.writerNodeID,
                     packet.snapshotID,
-                    packet.basePluginName,
-                    packet.baseLocalFormID,
-                    packet.cellPluginName,
-                    packet.cellLocalFormID);
+                    (packet.flags & Protocol::kDeleted) ? 1 : 0);
             } else {
                 SKSE::log::warn(
                     "CFT STRPM TX failed result={} target={} type={} snapshot={}",
@@ -149,16 +150,19 @@ namespace CampfireTogether
 
         if (Protocol::IsObjectPacket(packet)) {
             SKSE::log::info(
-                "CFT STRPM TX target={} type={} event={} snapshot={} base={}:{:08X} cell={}:{:08X} tent={}",
+                "CFT STRPM TX target={} origin={:016X} object={} rev={} writer={:016X} snapshot={} base={}:{:08X} cell={}:{:08X} tent={} deleted={}",
                 target.connectionID,
-                static_cast<unsigned>(packet.type),
-                packet.eventID,
+                packet.originNodeID,
+                packet.objectID,
+                packet.revision,
+                packet.writerNodeID,
                 packet.snapshotID,
                 packet.basePluginName,
                 packet.baseLocalFormID,
                 packet.cellPluginName,
                 packet.cellLocalFormID,
-                (packet.flags & Protocol::kTent) ? 1 : 0);
+                (packet.flags & Protocol::kTent) ? 1 : 0,
+                (packet.flags & Protocol::kDeleted) ? 1 : 0);
         } else {
             SKSE::log::info(
                 "CFT STRPM TX target={} type={} snapshot={}",
@@ -199,7 +203,7 @@ namespace CampfireTogether
 
         auto packet = MakeSnapshotRequest();
         if (Send(packet)) {
-            SKSE::log::info("CFT SNAPSHOT REQUEST broadcast request={}", packet.snapshotID);
+            SKSE::log::info("CFT SHARED SNAPSHOT REQUEST broadcast request={}", packet.snapshotID);
         }
     }
 
@@ -212,7 +216,7 @@ namespace CampfireTogether
         auto packet = MakeSnapshotRequest();
         if (SendTo(connectionID, packet)) {
             SKSE::log::info(
-                "CFT SNAPSHOT REQUEST targeted connection={} request={}",
+                "CFT SHARED SNAPSHOT REQUEST targeted connection={} request={}",
                 connectionID,
                 packet.snapshotID);
         }
@@ -269,6 +273,7 @@ namespace CampfireTogether
 
     void STRPMClient::HandleProxyMapping(const STRPM::ProxyMappingEvent& event)
     {
+        auto& shared = SharedCampSync::GetSingleton();
         switch (event.type) {
         case STRPM::ProxyMappingEventType::kAdded:
             if (event.connectionID != 0 && event.newFormID != STRPM::kInvalidProxyFormID) {
@@ -276,9 +281,10 @@ namespace CampfireTogether
                     "CFT STRPM PROXY added connection={} proxy={:08X}",
                     event.connectionID,
                     event.newFormID);
-                (void)MarkPeerObserved(event.connectionID);
-                CampfireSync::GetSingleton().OnPeerAvailable(event.connectionID);
-                CampfireSync::GetSingleton().RefreshRemoteExteriorAtPlayer();
+                const bool first = MarkPeerObserved(event.connectionID);
+                if (first) {
+                    shared.OnPeerAvailable(event.connectionID);
+                }
             }
             break;
         case STRPM::ProxyMappingEventType::kUpdated:
@@ -288,26 +294,27 @@ namespace CampfireTogether
                     event.connectionID,
                     event.oldFormID,
                     event.newFormID);
-                (void)MarkPeerObserved(event.connectionID);
-                CampfireSync::GetSingleton().OnPeerAvailable(event.connectionID);
-                CampfireSync::GetSingleton().RefreshRemoteExteriorAtPlayer();
+                const bool first = MarkPeerObserved(event.connectionID);
+                if (first) {
+                    shared.OnPeerAvailable(event.connectionID);
+                }
             } else if (event.connectionID != 0) {
                 ForgetPeer(event.connectionID);
-                SKSE::log::info(
-                    "CFT STRPM PROXY unavailable connection={} preserving remote camp state",
-                    event.connectionID);
+                shared.OnPeerUnavailable(event.connectionID);
             }
             break;
         case STRPM::ProxyMappingEventType::kRemoved:
             SKSE::log::info(
-                "CFT STRPM PROXY removed connection={} old={:08X} preserving remote camp state",
+                "CFT STRPM PROXY removed connection={} old={:08X} sharedRegistryPreserved=1",
                 event.connectionID,
                 event.oldFormID);
             ForgetPeer(event.connectionID);
+            shared.OnPeerUnavailable(event.connectionID);
             break;
         case STRPM::ProxyMappingEventType::kCleared:
-            SKSE::log::info("CFT STRPM PROXY mappings cleared; preserving remote camp state");
+            SKSE::log::info("CFT STRPM PROXY mappings cleared sharedRegistryPreserved=1");
             ForgetAllPeers();
+            shared.OnAllPeersUnavailable();
             break;
         default:
             break;
@@ -322,10 +329,11 @@ namespace CampfireTogether
 
         if (message.size != sizeof(Protocol::Packet)) {
             SKSE::log::warn(
-                "CFT STRPM RX rejected incompatible packet connection={} bytes={} expected={}",
+                "CFT STRPM RX rejected incompatible packet connection={} bytes={} expected={} protocol={}",
                 message.sender.connectionID,
                 message.size,
-                sizeof(Protocol::Packet));
+                sizeof(Protocol::Packet),
+                Protocol::kVersion);
             return;
         }
 
@@ -344,15 +352,19 @@ namespace CampfireTogether
 
         if (Protocol::IsObjectPacket(packet)) {
             SKSE::log::info(
-                "CFT STRPM RX connection={} type={} event={} snapshot={} base={}:{:08X} cell={}:{:08X}",
+                "CFT STRPM RX connection={} origin={:016X} object={} rev={} writer={:016X} snapshot={} base={}:{:08X} cell={}:{:08X} tent={} deleted={}",
                 connectionID,
-                static_cast<unsigned>(packet.type),
-                packet.eventID,
+                packet.originNodeID,
+                packet.objectID,
+                packet.revision,
+                packet.writerNodeID,
                 packet.snapshotID,
                 packet.basePluginName,
                 packet.baseLocalFormID,
                 packet.cellPluginName,
-                packet.cellLocalFormID);
+                packet.cellLocalFormID,
+                (packet.flags & Protocol::kTent) ? 1 : 0,
+                (packet.flags & Protocol::kDeleted) ? 1 : 0);
         } else {
             SKSE::log::info(
                 "CFT STRPM RX connection={} type={} snapshot={}",
@@ -362,17 +374,14 @@ namespace CampfireTogether
         }
 
         auto dispatch = [connectionID, packet, firstObservedPacket]() {
-            auto& sync = CampfireSync::GetSingleton();
+            auto& shared = SharedCampSync::GetSingleton();
             if (firstObservedPacket) {
                 SKSE::log::info(
                     "CFT STRPM PEER discovered from RX connection={} fallback=1",
                     connectionID);
-                sync.OnPeerAvailable(connectionID);
+                shared.OnPeerAvailable(connectionID);
             }
-            sync.HandleRemote(connectionID, packet);
-            if (packet.type == Protocol::PacketType::kPlace) {
-                sync.RefreshRemoteExteriorAtPlayer();
-            }
+            shared.HandleRemote(connectionID, packet);
         };
 
         if (auto* tasks = SKSE::GetTaskInterface()) {
