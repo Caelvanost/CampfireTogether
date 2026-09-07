@@ -1,11 +1,11 @@
 #include "PCH.h"
 
-#include "CampfireSync.h"
 #include "CampfireTogether/Version.h"
 #include "CellTracker.h"
 #include "LocalBuildIntent.h"
 #include "PapyrusBridge.h"
 #include "Serialization.h"
+#include "SharedCampSync.h"
 #include "STRPMClient.h"
 
 namespace logger = SKSE::log;
@@ -37,13 +37,13 @@ namespace
 
     void ExchangeState(const char* reason)
     {
-        logger::info("CFT state exchange reason={}", reason);
+        logger::info("CFT shared state exchange reason={}", reason);
         auto& client = CampfireTogether::STRPMClient::GetSingleton();
         if (!client.Initialize()) {
             return;
         }
 
-        CampfireTogether::CampfireSync::GetSingleton().BroadcastSnapshot();
+        CampfireTogether::SharedCampSync::GetSingleton().BroadcastSnapshot();
         client.RequestSnapshots();
     }
 
@@ -62,17 +62,17 @@ namespace
             break;
         case SKSE::MessagingInterface::kPreLoadGame:
             logger::info("CFT preparing for save load");
-            CampfireTogether::CampfireSync::GetSingleton().ResetRemoteState();
+            CampfireTogether::SharedCampSync::GetSingleton().ResetRuntimeState();
             CampfireTogether::LocalBuildIntent::Reset();
             break;
         case SKSE::MessagingInterface::kPostLoadGame:
-            CampfireTogether::CampfireSync::GetSingleton().ResetRemoteState();
+            CampfireTogether::SharedCampSync::GetSingleton().ResetRuntimeState();
             CampfireTogether::LocalBuildIntent::Reset();
             InitializeRuntime("post-load-game");
             ExchangeState("post-load-game");
             break;
         case SKSE::MessagingInterface::kNewGame:
-            CampfireTogether::CampfireSync::GetSingleton().Reset();
+            CampfireTogether::SharedCampSync::GetSingleton().Reset();
             CampfireTogether::LocalBuildIntent::Reset();
             InitializeRuntime("new-game");
             ExchangeState("new-game");
@@ -107,6 +107,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
         return false;
     }
 
-    logger::info("Campfire Together initialized");
+    logger::info("Campfire Together initialized sharedRegistry=1");
     return true;
 }
