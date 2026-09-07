@@ -136,11 +136,12 @@ namespace CampfireTogether
             bool isTent) const;
 
         void SendSnapshot(std::optional<STRPM::ConnectionID> target);
-        void BroadcastRecord(const CampRecord& record, std::uint64_t snapshotID = 0);
+        void BroadcastRecord(const CampRecord& record);
         void ApplyRuntimeState(const CampID& id);
         void MaterializeIfPossible(const CampID& id, const CampRecord& record);
         [[nodiscard]] RE::TESObjectCELL* FindLoadedCellForRecord(const CampRecord& record) const;
         [[nodiscard]] RE::TESObjectREFR* FindAnchor(RE::TESObjectCELL* cell) const;
+        [[nodiscard]] RE::TESObjectREFR* FindExistingMirror(RE::TESObjectCELL* cell, const CampRecord& record) const;
 
         [[nodiscard]] bool ConsumeSuppressedRemoval(RE::FormID baseFormID, float x, float y, float z, bool isTent);
         void MarkSuppressedRemoval(const Mirror& mirror);
