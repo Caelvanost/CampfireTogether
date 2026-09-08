@@ -8,6 +8,7 @@ namespace CampfireTogether
     namespace
     {
         constexpr char kChannel[] = "campfiretogether";
+        constexpr auto kSuccessfulProbeCooldown = std::chrono::seconds(10);
     }
 
     STRPMClient& STRPMClient::GetSingleton()
@@ -82,6 +83,10 @@ namespace CampfireTogether
         _resolver = nullptr;
         _api = nullptr;
         ForgetAllPeers();
+        {
+            std::scoped_lock lock(_probeMutex);
+            _lastSuccessfulProbe = {};
+        }
         SharedCampSync::GetSingleton().OnAllPeersUnavailable();
     }
 
@@ -220,6 +225,43 @@ namespace CampfireTogether
                 connectionID,
                 packet.snapshotID);
         }
+    }
+
+    void STRPMClient::ProbeStateExchange()
+    {
+        if (!_api || !_api->getLocalConnectionID) {
+            return;
+        }
+
+        STRPM::ConnectionID localConnectionID = 0;
+        const auto connectionResult = _api->getLocalConnectionID(&localConnectionID);
+        if (connectionResult != STRPM::Result::kOk || localConnectionID == 0) {
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        {
+            std::scoped_lock lock(_probeMutex);
+            if (_lastSuccessfulProbe.time_since_epoch().count() != 0 &&
+                now - _lastSuccessfulProbe < kSuccessfulProbeCooldown) {
+                return;
+            }
+        }
+
+        auto packet = MakeSnapshotRequest();
+        if (!Send(packet)) {
+            return;
+        }
+
+        {
+            std::scoped_lock lock(_probeMutex);
+            _lastSuccessfulProbe = now;
+        }
+
+        SKSE::log::info(
+            "CFT STRPM BOOTSTRAP connected localConnection={} request={} trigger=cell-load",
+            localConnectionID,
+            packet.snapshotID);
     }
 
     bool STRPMClient::MarkPeerObserved(STRPM::ConnectionID connectionID)
