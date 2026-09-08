@@ -20,6 +20,7 @@ namespace CampfireTogether
 
         void RequestSnapshots();
         void RequestSnapshot(STRPM::ConnectionID connectionID);
+        void ProbeStateExchange();
 
     private:
         static void STRPM_CALL OnMessage(const STRPM::Message* message, void* userData);
@@ -40,5 +41,7 @@ namespace CampfireTogether
         std::atomic<std::uint64_t> _nextSnapshotRequestID{ 1 };
         std::mutex _peerMutex;
         std::unordered_set<STRPM::ConnectionID> _observedPeers;
+        std::mutex _probeMutex;
+        std::chrono::steady_clock::time_point _lastSuccessfulProbe{};
     };
 }
