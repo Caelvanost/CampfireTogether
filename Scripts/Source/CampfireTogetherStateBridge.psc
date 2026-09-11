@@ -19,6 +19,8 @@ Function PollCampfires()
         ObjectReference ref = CampfireTogetherNative.GetTrackedCampfire(i)
         CampCampfire fire = ref as CampCampfire
         If fire
+            ConfigureMultiplayerSeat(ref, fire)
+
             If CampfireTogetherNative.CampfireStateNeedsApply(ref)
                 ApplyAuthoritativeState(ref, fire)
                 CampfireTogetherNative.AcknowledgeCampfireState(ref)
@@ -28,6 +30,39 @@ Function PollCampfires()
         EndIf
         i += 1
     EndWhile
+EndFunction
+
+Function ConfigureMultiplayerSeat(ObjectReference ref, CampCampfire fire)
+    ; Never change the property mapping while the local player is sitting or
+    ; entering/leaving furniture. Campfire uses mySitFurniture2 for Get Up too.
+    If Game.GetPlayer().GetSitState() != 0
+        Return
+    EndIf
+
+    ObjectReference currentPlayerSeat = fire.mySitFurniture2
+    If !currentPlayerSeat
+        Return
+    EndIf
+
+    ObjectReference assignedSeat = CampfireTogetherNative.GetAssignedCampfireSeat(ref, fire.mySitFurniture1, fire.mySitFurniture2, fire.mySitFurniture3, fire.mySitFurniture4)
+    If !assignedSeat || assignedSeat == currentPlayerSeat
+        Return
+    EndIf
+
+    ; Keep the four physical furniture references intact and unique. We only
+    ; permute which one Campfire calls mySitFurniture2, so all vanilla Sit/Get Up
+    ; behavior continues unchanged and TakeDown still owns every child exactly once.
+    If assignedSeat == fire.mySitFurniture1
+        fire.mySitFurniture1 = currentPlayerSeat
+    ElseIf assignedSeat == fire.mySitFurniture3
+        fire.mySitFurniture3 = currentPlayerSeat
+    ElseIf assignedSeat == fire.mySitFurniture4
+        fire.mySitFurniture4 = currentPlayerSeat
+    Else
+        Return
+    EndIf
+
+    fire.mySitFurniture2 = assignedSeat
 EndFunction
 
 Float Function GetResourcefulMultiplier(CampCampfire fire)
