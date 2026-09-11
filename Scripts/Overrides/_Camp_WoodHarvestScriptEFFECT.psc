@@ -44,6 +44,10 @@ Event OnEffectStart(Actor akTarget, Actor akCaster)
         return
     endif
 
+    RunHarvestMenu()
+endEvent
+
+function RunHarvestMenu()
     if _Camp_HarvestWoodEnabled.GetValueInt() != 2
         return
     endif
@@ -77,12 +81,15 @@ Event OnEffectStart(Actor akTarget, Actor akCaster)
     else
         ;pass
     endif
-endEvent
+endFunction
 
 function HarvestWood()
     if PlayerRef.GetItemCount(woodChoppingAxes) == 0 && PlayerRef.GetItemCount(_Camp_StoneWarAxe) == 0
         WoodChoppingFailureMessage.Show()
-        OnEffectStart(PlayerRef, PlayerRef)
+        ; The original script recursively called OnEffectStart here. Keep the
+        ; same menu behavior without re-running the multiplayer intent guard,
+        ; because the player may have spent more than two seconds in the message.
+        RunHarvestMenu()
         return
     endif
     _Camp_FadeDown.Apply()
