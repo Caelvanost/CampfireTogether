@@ -8,7 +8,7 @@ namespace CampfireTogether
     namespace
     {
         constexpr char kChannel[] = "campfiretogether";
-        constexpr auto kSuccessfulProbeCooldown = std::chrono::seconds(10);
+        constexpr auto kProbeCooldown = std::chrono::seconds(10);
     }
 
     STRPMClient& STRPMClient::GetSingleton()
@@ -85,7 +85,7 @@ namespace CampfireTogether
         ForgetAllPeers();
         {
             std::scoped_lock lock(_probeMutex);
-            _lastSuccessfulProbe = {};
+            _lastProbeAttempt = {};
         }
         SharedCampSync::GetSingleton().OnAllPeersUnavailable();
     }
@@ -242,20 +242,16 @@ namespace CampfireTogether
         const auto now = std::chrono::steady_clock::now();
         {
             std::scoped_lock lock(_probeMutex);
-            if (_lastSuccessfulProbe.time_since_epoch().count() != 0 &&
-                now - _lastSuccessfulProbe < kSuccessfulProbeCooldown) {
+            if (_lastProbeAttempt.time_since_epoch().count() != 0 &&
+                now - _lastProbeAttempt < kProbeCooldown) {
                 return;
             }
+            _lastProbeAttempt = now;
         }
 
         auto packet = MakeSnapshotRequest();
         if (!Send(packet)) {
             return;
-        }
-
-        {
-            std::scoped_lock lock(_probeMutex);
-            _lastSuccessfulProbe = now;
         }
 
         SKSE::log::info(
