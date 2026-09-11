@@ -13,6 +13,7 @@ namespace CampfireTogether
         void OnCellFullyLoaded(RE::TESObjectCELL* cell);
         void RefreshTrackedCampfires();
         void TrackCampfireReference(RE::TESObjectREFR* reference);
+        [[nodiscard]] bool CanReportObserved(RE::TESObjectREFR* reference) const;
         void ReportObserved(
             RE::TESObjectREFR* reference,
             std::int32_t stage,
