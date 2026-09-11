@@ -1,6 +1,8 @@
 #include "PCH.h"
 #include "CellTracker.h"
 
+#include "FireStateSync.h"
+#include "FireStateTransport.h"
 #include "SharedCampSync.h"
 #include "STRPMClient.h"
 
@@ -22,13 +24,12 @@ namespace CampfireTogether::CellTracker
                     return;
                 }
 
-                // Bootstrap the shared registry even when ProxyResolver does not emit
-                // an add/update callback after STR connects. getLocalConnectionID()
-                // is cheap and the actual successful probe is throttled in STRPMClient.
                 STRPMClient::GetSingleton().ProbeStateExchange();
+                FireStateTransport::GetSingleton().ProbeStateExchange();
 
                 SKSE::log::debug("CFT CELL deferred process cell={:08X}", cellID);
                 SharedCampSync::GetSingleton().OnCellFullyLoaded(cell);
+                FireStateSync::GetSingleton().OnCellFullyLoaded(cell);
             });
         }
 
@@ -69,7 +70,7 @@ namespace CampfireTogether::CellTracker
 
         events->AddEventSink<RE::TESCellFullyLoadedEvent>(&CellFullyLoadedSink::GetSingleton());
         g_registered = true;
-        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent sharedRegistry=1 deferredOnly=1 bootstrapProbe=1");
+        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent sharedRegistry=1 fireState=1 deferredOnly=1 bootstrapProbe=1");
         return true;
     }
 }
