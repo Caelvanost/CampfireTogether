@@ -29,7 +29,14 @@ namespace CampfireTogether::CellTracker
 
                 SKSE::log::debug("CFT CELL deferred process cell={:08X}", cellID);
                 SharedCampSync::GetSingleton().OnCellFullyLoaded(cell);
-                FireStateSync::GetSingleton().OnCellFullyLoaded(cell);
+
+                // Fire-state discovery uses ForEachReference. Keep that scan limited
+                // to the player's actual cell so fast travel cannot reintroduce the
+                // v0.2.4 streaming regression where every loaded exterior cell was scanned.
+                if (auto* player = RE::PlayerCharacter::GetSingleton();
+                    player && player->GetParentCell() == cell) {
+                    FireStateSync::GetSingleton().OnCellFullyLoaded(cell);
+                }
             });
         }
 
@@ -70,7 +77,7 @@ namespace CampfireTogether::CellTracker
 
         events->AddEventSink<RE::TESCellFullyLoadedEvent>(&CellFullyLoadedSink::GetSingleton());
         g_registered = true;
-        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent sharedRegistry=1 fireState=1 deferredOnly=1 bootstrapProbe=1");
+        SKSE::log::info("CFT CELL TRACKER READY event=TESCellFullyLoadedEvent sharedRegistry=1 fireState=1 playerCellScanOnly=1 bootstrapProbe=1");
         return true;
     }
 }
