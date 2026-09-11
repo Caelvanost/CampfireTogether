@@ -20,6 +20,7 @@ add_commonlibsse_plugin(${PROJECT_NAME}
         src/main.cpp
         src/CellTracker.cpp
         src/FireStateSync.cpp
+        src/FireStateSyncAccess.cpp
         src/FireStateTransport.cpp
         src/LocalBuildIntent.cpp
         src/PapyrusBridge.cpp
