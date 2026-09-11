@@ -10,6 +10,7 @@ namespace CampfireTogether::LocalBuildIntent
         std::atomic_bool g_registered{ false };
         std::mutex g_mutex;
         std::chrono::steady_clock::time_point g_expiresAt{};
+        std::string g_claimedPowerTag;
 
         bool IsShoutAction(const RE::ButtonEvent& button)
         {
@@ -26,12 +27,23 @@ namespace CampfireTogether::LocalBuildIntent
             {
                 std::scoped_lock lock(g_mutex);
                 g_expiresAt = std::chrono::steady_clock::now() + kIntentLifetime;
+                g_claimedPowerTag.clear();
             }
 
             SKSE::log::info(
-                "CFT LOCAL BUILD INTENT armed action=Shout device={} id={}",
+                "CFT LOCAL POWER INTENT armed action=Shout device={} id={} window_ms=2000",
                 static_cast<unsigned>(button.GetDevice()),
                 button.GetIDCode());
+        }
+
+        [[nodiscard]] bool HasLiveIntentLocked(std::chrono::steady_clock::time_point now)
+        {
+            if (g_expiresAt == std::chrono::steady_clock::time_point{} || g_expiresAt < now) {
+                g_expiresAt = {};
+                g_claimedPowerTag.clear();
+                return false;
+            }
+            return true;
         }
 
         class InputSink final :
@@ -79,7 +91,7 @@ namespace CampfireTogether::LocalBuildIntent
 
         auto* inputManager = RE::BSInputDeviceManager::GetSingleton();
         if (!inputManager) {
-            SKSE::log::warn("CFT LOCAL BUILD INTENT input sink unavailable: BSInputDeviceManager is null");
+            SKSE::log::warn("CFT LOCAL POWER INTENT input sink unavailable: BSInputDeviceManager is null");
             return;
         }
 
@@ -88,27 +100,77 @@ namespace CampfireTogether::LocalBuildIntent
         }
 
         inputManager->AddEventSink(std::addressof(InputSink::GetSingleton()));
-        SKSE::log::info("CFT LOCAL BUILD INTENT input sink READY action=Shout window_ms=2000");
+        SKSE::log::info("CFT LOCAL POWER INTENT input sink READY action=Shout window_ms=2000");
     }
 
     void Reset()
     {
         std::scoped_lock lock(g_mutex);
         g_expiresAt = {};
+        g_claimedPowerTag.clear();
+    }
+
+    bool ConsumePower(std::string_view powerTag, RE::Actor* caster)
+    {
+        if (powerTag.empty()) {
+            return false;
+        }
+
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        if (caster && player && caster != player) {
+            SKSE::log::info(
+                "CFT REMOTE POWER suppressed tag={} caster={:08X} reason=remote-caster",
+                powerTag,
+                caster->GetFormID());
+            return false;
+        }
+
+        std::scoped_lock lock(g_mutex);
+        const auto now = std::chrono::steady_clock::now();
+        if (!HasLiveIntentLocked(now)) {
+            SKSE::log::info(
+                "CFT REMOTE POWER suppressed tag={} caster={:08X} reason=no-local-intent",
+                powerTag,
+                caster ? caster->GetFormID() : 0);
+            return false;
+        }
+
+        if (g_claimedPowerTag.empty()) {
+            g_claimedPowerTag.assign(powerTag);
+            SKSE::log::info("CFT LOCAL POWER INTENT claimed tag={}", g_claimedPowerTag);
+            return true;
+        }
+
+        if (g_claimedPowerTag == powerTag) {
+            return true;
+        }
+
+        SKSE::log::info(
+            "CFT REMOTE POWER suppressed tag={} claimed={} reason=tag-mismatch",
+            powerTag,
+            g_claimedPowerTag);
+        return false;
+    }
+
+    bool AuthorizeNestedPower(std::string_view powerTag)
+    {
+        if (powerTag.empty()) {
+            return false;
+        }
+
+        std::scoped_lock lock(g_mutex);
+        const auto now = std::chrono::steady_clock::now();
+        if (!HasLiveIntentLocked(now)) {
+            return false;
+        }
+
+        g_claimedPowerTag.assign(powerTag);
+        SKSE::log::info("CFT LOCAL POWER INTENT nested-authorized tag={}", g_claimedPowerTag);
+        return true;
     }
 
     bool Consume()
     {
-        std::scoped_lock lock(g_mutex);
-
-        const auto now = std::chrono::steady_clock::now();
-        if (g_expiresAt == std::chrono::steady_clock::time_point{} || g_expiresAt < now) {
-            g_expiresAt = {};
-            return false;
-        }
-
-        g_expiresAt = {};
-        SKSE::log::info("CFT LOCAL BUILD INTENT consumed");
-        return true;
+        return ConsumePower("build", RE::PlayerCharacter::GetSingleton());
     }
 }
