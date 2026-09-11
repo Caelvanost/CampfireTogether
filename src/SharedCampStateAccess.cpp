@@ -107,6 +107,30 @@ namespace CampfireTogether
         return it != _sharedCamps.end() && !it->second.deleted;
     }
 
+    RE::TESObjectREFR* SharedCampSync::FindPhysicalCamp(
+        std::uint64_t originNodeID,
+        std::uint64_t objectID) const
+    {
+        if (originNodeID == 0 || objectID == 0) {
+            return nullptr;
+        }
+
+        std::scoped_lock lock(_mutex);
+        const CampID id{ originNodeID, objectID };
+        const auto recordIt = _sharedCamps.find(id);
+        if (recordIt == _sharedCamps.end() || recordIt->second.deleted) {
+            return nullptr;
+        }
+
+        const auto mirrorIt = _mirrors.find(id);
+        if (mirrorIt == _mirrors.end()) {
+            return nullptr;
+        }
+
+        auto reference = mirrorIt->second.handle.get();
+        return reference && !reference->IsMarkedForDeletion() ? reference.get() : nullptr;
+    }
+
     std::uint64_t SharedCampSync::GetLocalNodeID()
     {
         return EnsureLocalNodeID();
