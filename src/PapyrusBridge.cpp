@@ -34,6 +34,10 @@ namespace CampfireTogether::PapyrusBridge
                 angleY,
                 angleZ,
                 isTent);
+
+            if (!isTent) {
+                FireStateSync::GetSingleton().TrackCampfireReference(placedRef);
+            }
         }
 
         void ReportRemoved(
@@ -113,7 +117,9 @@ namespace CampfireTogether::PapyrusBridge
 
         std::int32_t GetTrackedCampfireCount(RE::StaticFunctionTag*)
         {
-            return FireStateSync::GetSingleton().GetTrackedCount();
+            auto& sync = FireStateSync::GetSingleton();
+            sync.RefreshTrackedCampfires();
+            return sync.GetTrackedCount();
         }
 
         RE::TESObjectREFR* GetTrackedCampfire(RE::StaticFunctionTag*, std::int32_t index)
@@ -166,7 +172,12 @@ namespace CampfireTogether::PapyrusBridge
             RE::TESForm* fuelUnlit,
             RE::TESForm* light)
         {
-            FireStateSync::GetSingleton().ReportObserved(
+            auto& sync = FireStateSync::GetSingleton();
+            if (!sync.CanReportObserved(reference)) {
+                return;
+            }
+
+            sync.ReportObserved(
                 reference,
                 stage,
                 size,
