@@ -22,6 +22,13 @@ namespace CampfireTogether
         void RequestSnapshot(STRPM::ConnectionID connectionID);
         void ProbeStateExchange();
 
+        // Returns this client's deterministic rank among currently observed STR
+        // connections. All peers sort the same global connection IDs, so the
+        // rank can safely drive local-only furniture-slot selection.
+        [[nodiscard]] std::optional<std::size_t> GetLocalSeatOrdinal(
+            std::size_t seatCount,
+            std::size_t& participantCount);
+
     private:
         static void STRPM_CALL OnMessage(const STRPM::Message* message, void* userData);
         static void STRPM_CALL OnProxyMapping(const STRPM::ProxyMappingEvent* event, void* userData);
