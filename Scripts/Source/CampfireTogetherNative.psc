@@ -14,6 +14,19 @@ Float Function GetRemoteMaterializationAngleZ(Int aiRequestID) Global Native
 Function ReportRemoteMaterialized(Int aiRequestID, ObjectReference akReference) Global Native
 Function ReportRemoteMaterializationFailed(Int aiRequestID) Global Native
 
+Int Function GetTrackedCampfireCount() Global Native
+ObjectReference Function GetTrackedCampfire(Int aiIndex) Global Native
+Bool Function CampfireStateNeedsApply(ObjectReference akReference) Global Native
+Int Function GetDesiredCampfireStage(ObjectReference akReference) Global Native
+Int Function GetDesiredCampfireSize(ObjectReference akReference) Global Native
+Float Function GetDesiredCampfireRemainingHours(ObjectReference akReference) Global Native
+Form Function GetDesiredCampfireFuelLit(ObjectReference akReference) Global Native
+Form Function GetDesiredCampfireFuelUnlit(ObjectReference akReference) Global Native
+Form Function GetDesiredCampfireLight(ObjectReference akReference) Global Native
+Function ReportCampfireState(ObjectReference akReference, Int aiStage, Int aiSize, Float afRemainingHours, Form akFuelLit, Form akFuelUnlit, Form akLight) Global Native
+Function AcknowledgeCampfireState(ObjectReference akReference) Global Native
+Function StateBridgeReady() Global Native
+
 Bool Function ConsumeLocalBuildIntent() Global Native
 Function ReportRemoteBuildSuppressed(Actor akCaster) Global Native
 Function ReportRemoteBedrollAccess(ObjectReference akBedroll, ObjectReference akTent) Global Native
