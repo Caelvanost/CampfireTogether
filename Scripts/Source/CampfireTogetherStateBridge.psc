@@ -45,14 +45,7 @@ Function ReportObservedState(ObjectReference ref, CampCampfire fire)
         light = fire.myLight.GetBaseObject()
     EndIf
 
-    CampfireTogetherNative.ReportCampfireState(
-        ref,
-        fire.campfire_stage,
-        fire.campfire_size,
-        fire.GetRemainingDisplayTime(),
-        fuelLit,
-        fuelUnlit,
-        light)
+    CampfireTogetherNative.ReportCampfireState(ref, fire.campfire_stage, fire.campfire_size, fire.GetRemainingDisplayTime(), fuelLit, fuelUnlit, light)
 EndFunction
 
 Function ApplyAuthoritativeState(ObjectReference ref, CampCampfire fire)
