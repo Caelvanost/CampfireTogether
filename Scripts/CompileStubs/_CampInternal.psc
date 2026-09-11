@@ -4,15 +4,19 @@ Scriptname _CampInternal Hidden
 ; This file is never compiled or packaged.
 
 ObjectReference Function PlaceAndWaitFor3DLoaded(ObjectReference akOrigin, Form FormToPlace, Int Count = 1, Bool ForcePersist = False, Bool bDisableInteraction = False) Global
-	Return None
+    Return None
 EndFunction
 
 Quest Function GetCrimeTrackingQuest() Global
-	Return None
+    Return None
 EndFunction
 
 ReferenceAlias Function GetCrimeIllegalItemAlias(Int aiAlias) Global
-	Return None
+    Return None
+EndFunction
+
+_Camp_Strings Function GetCampfireStrings() Global
+    Return None
 EndFunction
 
 Function CampDebug(Int aiSeverity, String asLogMessage) Global
