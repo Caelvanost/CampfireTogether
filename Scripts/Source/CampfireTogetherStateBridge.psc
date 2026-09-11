@@ -30,6 +30,28 @@ Function PollCampfires()
     EndWhile
 EndFunction
 
+Float Function GetResourcefulMultiplier(CampCampfire fire)
+    Int rank = 0
+    If fire._Camp_PerkRank_Resourceful
+        rank = fire._Camp_PerkRank_Resourceful.GetValueInt()
+    EndIf
+    Return 1.0 + (rank * 0.25)
+EndFunction
+
+Float Function GetFullFuelHours(CampCampfire fire)
+    Float baseHours = 0.0
+    If fire.campfire_size == 1
+        baseHours = 1.0
+    ElseIf fire.campfire_size == 2
+        baseHours = 3.0
+    ElseIf fire.campfire_size == 3
+        baseHours = 6.0
+    ElseIf fire.campfire_size == 4
+        baseHours = 12.0
+    EndIf
+    Return baseHours * GetResourcefulMultiplier(fire)
+EndFunction
+
 Function ReportObservedState(ObjectReference ref, CampCampfire fire)
     Form fuelLit = None
     Form fuelUnlit = None
@@ -45,7 +67,15 @@ Function ReportObservedState(ObjectReference ref, CampCampfire fire)
         lightForm = fire.myLight.GetBaseObject()
     EndIf
 
-    CampfireTogetherNative.ReportCampfireState(ref, fire.campfire_stage, fire.campfire_size, fire.GetRemainingDisplayTime(), fuelLit, fuelUnlit, lightForm)
+    Float reportedHours = fire.GetRemainingDisplayTime()
+    If fire.campfire_stage >= 3 && fire.campfire_size > 0
+        ; Campfire reports 0 remaining while fuel is placed but unlit. Send the
+        ; prospective full duration instead so another client can light the same
+        ; shared fuel with the correct burn duration.
+        reportedHours = GetFullFuelHours(fire)
+    EndIf
+
+    CampfireTogetherNative.ReportCampfireState(ref, fire.campfire_stage, fire.campfire_size, reportedHours, fuelLit, fuelUnlit, lightForm)
 EndFunction
 
 Function ApplyAuthoritativeState(ObjectReference ref, CampCampfire fire)
@@ -86,14 +116,24 @@ Function ApplyAuthoritativeState(ObjectReference ref, CampCampfire fire)
         EndIf
     EndIf
 
-    Int burnHours = Math.Ceiling(desiredRemaining)
+    Float localMultiplier = GetResourcefulMultiplier(fire)
+    If localMultiplier <= 0.0
+        localMultiplier = 1.0
+    EndIf
+
+    Int burnHours = Math.Floor((desiredRemaining / localMultiplier) + 0.5)
     If burnHours < 1
         burnHours = 1
     EndIf
 
-    If fuelMismatch
-        ; SetFuel chooses lit/unlit assets based on campfire_stage, so establish
-        ; the desired stable stage first and let Campfire build its own children.
+    If desiredStage == 2 && desiredFuelLit && desiredFuelUnlit && desiredLight
+        ; Always rebuild the fuel when applying a remote burning state. Calling
+        ; LightFire() alone reuses this client's stale private burn_duration and
+        ; caused cases such as 5h45 on P1 becoming 0h45 on P2.
+        fire.campfire_stage = 2
+        fire.campfire_size = desiredSize
+        fire.SetFuel(desiredFuelLit, desiredFuelUnlit, desiredLight, burnHours, true)
+    ElseIf fuelMismatch
         fire.campfire_stage = desiredStage
         fire.campfire_size = desiredSize
         fire.SetFuel(desiredFuelLit, desiredFuelUnlit, desiredLight, burnHours, true)
@@ -105,8 +145,6 @@ Function ApplyAuthoritativeState(ObjectReference ref, CampCampfire fire)
         EndIf
     EndIf
 
-    ; Campfire's helpers intentionally normalize some transitions (for example
-    ; SetFuel -> PlaceFuel sets stage 3). Restore the authoritative stable value.
     fire.campfire_stage = desiredStage
     fire.campfire_size = desiredSize
 EndFunction
