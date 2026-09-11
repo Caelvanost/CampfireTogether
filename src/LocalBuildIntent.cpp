@@ -159,13 +159,14 @@ namespace CampfireTogether::LocalBuildIntent
         }
 
         std::scoped_lock lock(g_mutex);
-        const auto now = std::chrono::steady_clock::now();
-        if (!HasLiveIntentLocked(now)) {
-            return false;
-        }
 
+        // This is only invoked by the already-authorized local Resourcefulness
+        // script after the player chooses a submenu entry. Re-arm here so taking
+        // more than two seconds to choose does not suppress the legitimate nested
+        // Harvest / Build / Create cast.
         g_claimedPowerTag.assign(powerTag);
-        SKSE::log::info("CFT LOCAL POWER INTENT nested-authorized tag={}", g_claimedPowerTag);
+        g_expiresAt = std::chrono::steady_clock::now() + kIntentLifetime;
+        SKSE::log::info("CFT LOCAL POWER INTENT nested-authorized tag={} window_ms=2000", g_claimedPowerTag);
         return true;
     }
 
