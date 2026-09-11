@@ -11,6 +11,7 @@ namespace CampfireTogether
         static FireStateSync& GetSingleton();
 
         void OnCellFullyLoaded(RE::TESObjectCELL* cell);
+        void TrackCampfireReference(RE::TESObjectREFR* reference);
         void ReportObserved(
             RE::TESObjectREFR* reference,
             std::int32_t stage,
