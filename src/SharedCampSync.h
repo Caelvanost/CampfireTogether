@@ -46,6 +46,7 @@ namespace CampfireTogether
             std::uint64_t& objectID,
             bool& isTent) const;
         [[nodiscard]] bool IsCampActive(std::uint64_t originNodeID, std::uint64_t objectID) const;
+        [[nodiscard]] RE::TESObjectREFR* FindPhysicalCamp(std::uint64_t originNodeID, std::uint64_t objectID) const;
         [[nodiscard]] std::uint64_t GetLocalNodeID();
 
         // Compatibility stubs for the short-lived v0.2.8 Papyrus materialization bridge.
