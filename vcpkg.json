@@ -1,6 +1,6 @@
 {
   "name": "campfire-together",
-  "version-string": "0.4.1",
+  "version-string": "0.4.2",
   "dependencies": [
     "commonlibsse-ng"
   ]
