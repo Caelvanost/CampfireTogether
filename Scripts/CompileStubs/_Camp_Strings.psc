@@ -1,0 +1,9 @@
+Scriptname _Camp_Strings extends Quest
+
+String Property Follower_gathered Auto
+String Property FollowerHarvestDeadwood Auto
+String Property FollowerHarvestDeadwoodPlural Auto
+String Property FollowerHarvestBranches Auto
+String Property FollowerHarvestBranchesPlural Auto
+String Property FollowerNameGeneric Auto
+String Property AnimalNameGeneric Auto
