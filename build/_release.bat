@@ -83,34 +83,39 @@ if errorlevel 1 exit /b 1
 if errorlevel 1 exit /b 1
 "%COMPILER%" "%CFT_SOURCE%\CampfireTogetherStateBridge.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
+
 "%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_SpawnCampfire.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
 "%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_CampTentNPCBedrollScript.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
+"%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_CombinedActionsScript.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+if errorlevel 1 exit /b 1
+"%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_CraftingObjectEffectScript.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+if errorlevel 1 exit /b 1
+"%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_WoodHarvestScriptEFFECT.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+if errorlevel 1 exit /b 1
+"%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_InstinctsEffects.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+if errorlevel 1 exit /b 1
+"%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_InstinctsController.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+if errorlevel 1 exit /b 1
 
-if not exist "%PACKAGE%\Scripts\CampfireTogetherNative.pex" (
-    echo ERROR: CampfireTogetherNative.pex was not produced.
-    exit /b 1
-)
-if not exist "%PACKAGE%\Scripts\CampfireTogetherBridge.pex" (
-    echo ERROR: CampfireTogetherBridge.pex was not produced.
-    exit /b 1
-)
-if not exist "%PACKAGE%\Scripts\CampfireTogetherRemoteBridge.pex" (
-    echo ERROR: CampfireTogetherRemoteBridge.pex was not produced.
-    exit /b 1
-)
-if not exist "%PACKAGE%\Scripts\CampfireTogetherStateBridge.pex" (
-    echo ERROR: CampfireTogetherStateBridge.pex was not produced.
-    exit /b 1
-)
-if not exist "%PACKAGE%\Scripts\_Camp_SpawnCampfire.pex" (
-    echo ERROR: _Camp_SpawnCampfire.pex was not produced.
-    exit /b 1
-)
-if not exist "%PACKAGE%\Scripts\_Camp_CampTentNPCBedrollScript.pex" (
-    echo ERROR: _Camp_CampTentNPCBedrollScript.pex was not produced.
-    exit /b 1
+for %%F in (
+    CampfireTogetherNative.pex
+    CampfireTogetherBridge.pex
+    CampfireTogetherRemoteBridge.pex
+    CampfireTogetherStateBridge.pex
+    _Camp_SpawnCampfire.pex
+    _Camp_CampTentNPCBedrollScript.pex
+    _Camp_CombinedActionsScript.pex
+    _Camp_CraftingObjectEffectScript.pex
+    _Camp_WoodHarvestScriptEFFECT.pex
+    _Camp_InstinctsEffects.pex
+    _Camp_InstinctsController.pex
+) do (
+    if not exist "%PACKAGE%\Scripts\%%F" (
+        echo ERROR: %%F was not produced.
+        exit /b 1
+    )
 )
 
 echo.
@@ -153,12 +158,7 @@ if errorlevel 1 exit /b 1
 echo.
 echo Build complete:
 echo   DLL: %PACKAGE%\SKSE\Plugins\CampfireTogether.dll
-echo   PEX: %PACKAGE%\Scripts\CampfireTogetherNative.pex
-echo   PEX: %PACKAGE%\Scripts\CampfireTogetherBridge.pex
-echo   PEX: %PACKAGE%\Scripts\CampfireTogetherRemoteBridge.pex
-echo   PEX: %PACKAGE%\Scripts\CampfireTogetherStateBridge.pex
-echo   PEX: %PACKAGE%\Scripts\_Camp_SpawnCampfire.pex
-echo   PEX: %PACKAGE%\Scripts\_Camp_CampTentNPCBedrollScript.pex
+echo   Scripts: %PACKAGE%\Scripts
 echo   ESP: %PACKAGE%\CampfireTogether.esp
 echo   ZIP: %ZIP%
 echo.
