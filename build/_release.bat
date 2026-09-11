@@ -81,6 +81,8 @@ if errorlevel 1 exit /b 1
 if errorlevel 1 exit /b 1
 "%COMPILER%" "%CFT_SOURCE%\CampfireTogetherRemoteBridge.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
+"%COMPILER%" "%CFT_SOURCE%\CampfireTogetherStateBridge.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
+if errorlevel 1 exit /b 1
 "%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_SpawnCampfire.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
 if errorlevel 1 exit /b 1
 "%COMPILER%" "%OVERRIDE_SOURCE%\_Camp_CampTentNPCBedrollScript.psc" -f="%FLAGS%" -i="%PAPYRUS_IMPORTS%" -o="%PACKAGE%\Scripts"
@@ -96,6 +98,10 @@ if not exist "%PACKAGE%\Scripts\CampfireTogetherBridge.pex" (
 )
 if not exist "%PACKAGE%\Scripts\CampfireTogetherRemoteBridge.pex" (
     echo ERROR: CampfireTogetherRemoteBridge.pex was not produced.
+    exit /b 1
+)
+if not exist "%PACKAGE%\Scripts\CampfireTogetherStateBridge.pex" (
+    echo ERROR: CampfireTogetherStateBridge.pex was not produced.
     exit /b 1
 )
 if not exist "%PACKAGE%\Scripts\_Camp_SpawnCampfire.pex" (
@@ -150,6 +156,7 @@ echo   DLL: %PACKAGE%\SKSE\Plugins\CampfireTogether.dll
 echo   PEX: %PACKAGE%\Scripts\CampfireTogetherNative.pex
 echo   PEX: %PACKAGE%\Scripts\CampfireTogetherBridge.pex
 echo   PEX: %PACKAGE%\Scripts\CampfireTogetherRemoteBridge.pex
+echo   PEX: %PACKAGE%\Scripts\CampfireTogetherStateBridge.pex
 echo   PEX: %PACKAGE%\Scripts\_Camp_SpawnCampfire.pex
 echo   PEX: %PACKAGE%\Scripts\_Camp_CampTentNPCBedrollScript.pex
 echo   ESP: %PACKAGE%\CampfireTogether.esp
