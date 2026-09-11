@@ -7,12 +7,12 @@ GlobalVariable Property _Camp_Setting_CampfireMode Auto
 Message Property _Camp_CampfireModeSelect Auto
 
 Event OnEffectStart(Actor akTarget, Actor akCaster)
-    if !CampfireTogetherNative.ConsumeLocalBuildIntent()
-        Actor sourceActor = akCaster
-        if !sourceActor
-            sourceActor = akTarget
-        endif
+    Actor sourceActor = akCaster
+    if !sourceActor
+        sourceActor = akTarget
+    endif
 
+    if !CampfireTogetherNative.ConsumeLocalCampfirePower("build", sourceActor)
         CampfireTogetherNative.ReportRemoteBuildSuppressed(sourceActor)
         return
     endif
