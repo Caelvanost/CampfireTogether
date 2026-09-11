@@ -197,6 +197,19 @@ namespace CampfireTogether::PapyrusBridge
             SKSE::log::info("CFT PAPYRUS fire-state observer READY poll=2s");
         }
 
+        bool ConsumeLocalCampfirePower(
+            RE::StaticFunctionTag*,
+            std::string powerTag,
+            RE::Actor* caster)
+        {
+            return LocalBuildIntent::ConsumePower(powerTag, caster);
+        }
+
+        bool AuthorizeNestedCampfirePower(RE::StaticFunctionTag*, std::string powerTag)
+        {
+            return LocalBuildIntent::AuthorizeNestedPower(powerTag);
+        }
+
         bool ConsumeLocalBuildIntent(RE::StaticFunctionTag*)
         {
             return LocalBuildIntent::Consume();
@@ -256,12 +269,14 @@ namespace CampfireTogether::PapyrusBridge
         vm->RegisterFunction("AcknowledgeCampfireState", "CampfireTogetherNative", AcknowledgeCampfireState);
         vm->RegisterFunction("StateBridgeReady", "CampfireTogetherNative", StateBridgeReady);
 
+        vm->RegisterFunction("ConsumeLocalCampfirePower", "CampfireTogetherNative", ConsumeLocalCampfirePower);
+        vm->RegisterFunction("AuthorizeNestedCampfirePower", "CampfireTogetherNative", AuthorizeNestedCampfirePower);
         vm->RegisterFunction("ConsumeLocalBuildIntent", "CampfireTogetherNative", ConsumeLocalBuildIntent);
         vm->RegisterFunction("ReportRemoteBuildSuppressed", "CampfireTogetherNative", ReportRemoteBuildSuppressed);
         vm->RegisterFunction("ReportRemoteBedrollAccess", "CampfireTogetherNative", ReportRemoteBedrollAccess);
         vm->RegisterFunction("BridgeReady", "CampfireTogetherNative", BridgeReady);
 
-        SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative sharedRegistry=1 fireState=1");
+        SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative sharedRegistry=1 fireState=1 powerGuard=1");
         return true;
     }
 }
