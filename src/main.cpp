@@ -2,6 +2,8 @@
 
 #include "CampfireTogether/Version.h"
 #include "CellTracker.h"
+#include "FireStateSync.h"
+#include "FireStateTransport.h"
 #include "LocalBuildIntent.h"
 #include "PapyrusBridge.h"
 #include "Serialization.h"
@@ -33,18 +35,24 @@ namespace
         CampfireTogether::LocalBuildIntent::RegisterInputSink();
         CampfireTogether::CellTracker::Register();
         CampfireTogether::STRPMClient::GetSingleton().Initialize();
+        CampfireTogether::FireStateTransport::GetSingleton().Initialize();
     }
 
     void ExchangeState(const char* reason)
     {
         logger::info("CFT shared state exchange reason={}", reason);
-        auto& client = CampfireTogether::STRPMClient::GetSingleton();
-        if (!client.Initialize()) {
-            return;
+
+        auto& sharedClient = CampfireTogether::STRPMClient::GetSingleton();
+        if (sharedClient.Initialize()) {
+            CampfireTogether::SharedCampSync::GetSingleton().BroadcastSnapshot();
+            sharedClient.RequestSnapshots();
         }
 
-        CampfireTogether::SharedCampSync::GetSingleton().BroadcastSnapshot();
-        client.RequestSnapshots();
+        auto& fireClient = CampfireTogether::FireStateTransport::GetSingleton();
+        if (fireClient.Initialize()) {
+            CampfireTogether::FireStateSync::GetSingleton().SendSnapshot(std::nullopt);
+            fireClient.RequestSnapshots();
+        }
     }
 
     void OnSKSEMessage(SKSE::MessagingInterface::Message* message)
@@ -63,18 +71,17 @@ namespace
         case SKSE::MessagingInterface::kPreLoadGame:
             logger::info("CFT preparing for save load");
             CampfireTogether::SharedCampSync::GetSingleton().ResetRuntimeState();
+            CampfireTogether::FireStateSync::GetSingleton().ClearAll();
             CampfireTogether::LocalBuildIntent::Reset();
             break;
         case SKSE::MessagingInterface::kPostLoadGame:
-            // Serialization load already replaced the shared registry and cleared stale
-            // runtime handles. Do not clear the exterior-cell cache here: cell-loaded
-            // events may already have arrived between deserialization and post-load.
             CampfireTogether::LocalBuildIntent::Reset();
             InitializeRuntime("post-load-game");
             ExchangeState("post-load-game");
             break;
         case SKSE::MessagingInterface::kNewGame:
             CampfireTogether::SharedCampSync::GetSingleton().Reset();
+            CampfireTogether::FireStateSync::GetSingleton().ClearAll();
             CampfireTogether::LocalBuildIntent::Reset();
             InitializeRuntime("new-game");
             ExchangeState("new-game");
@@ -109,6 +116,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
         return false;
     }
 
-    logger::info("Campfire Together initialized sharedRegistry=1");
+    logger::info("Campfire Together initialized sharedRegistry=1 fireState=1");
     return true;
 }
