@@ -52,7 +52,7 @@ namespace CampfireTogether::FireStateProtocol
 #pragma pack(pop)
 
     static_assert(sizeof(FormIdentity) == 264);
-    static_assert(sizeof(Packet) == 844);
+    static_assert(sizeof(Packet) == 848);
     static_assert(std::is_trivially_copyable_v<Packet>);
 
     [[nodiscard]] inline bool IsStatePacket(const Packet& packet) noexcept
