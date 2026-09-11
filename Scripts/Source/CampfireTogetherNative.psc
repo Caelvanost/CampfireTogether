@@ -23,6 +23,7 @@ Float Function GetDesiredCampfireRemainingHours(ObjectReference akReference) Glo
 Form Function GetDesiredCampfireFuelLit(ObjectReference akReference) Global Native
 Form Function GetDesiredCampfireFuelUnlit(ObjectReference akReference) Global Native
 Form Function GetDesiredCampfireLight(ObjectReference akReference) Global Native
+ObjectReference Function GetAssignedCampfireSeat(ObjectReference akCampfire, ObjectReference akSeat1, ObjectReference akSeat2, ObjectReference akSeat3, ObjectReference akSeat4) Global Native
 Function ReportCampfireState(ObjectReference akReference, Int aiStage, Int aiSize, Float afRemainingHours, Form akFuelLit, Form akFuelUnlit, Form akLight) Global Native
 Function AcknowledgeCampfireState(ObjectReference akReference) Global Native
 Function StateBridgeReady() Global Native
