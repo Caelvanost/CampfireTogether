@@ -27,6 +27,8 @@ Function ReportCampfireState(ObjectReference akReference, Int aiStage, Int aiSiz
 Function AcknowledgeCampfireState(ObjectReference akReference) Global Native
 Function StateBridgeReady() Global Native
 
+Bool Function ConsumeLocalCampfirePower(String asPowerTag, Actor akCaster) Global Native
+Bool Function AuthorizeNestedCampfirePower(String asPowerTag) Global Native
 Bool Function ConsumeLocalBuildIntent() Global Native
 Function ReportRemoteBuildSuppressed(Actor akCaster) Global Native
 Function ReportRemoteBedrollAccess(ObjectReference akBedroll, ObjectReference akTent) Global Native
