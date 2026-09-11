@@ -260,6 +260,56 @@ namespace CampfireTogether
             packet.snapshotID);
     }
 
+    std::optional<std::size_t> STRPMClient::GetLocalSeatOrdinal(
+        std::size_t seatCount,
+        std::size_t& participantCount)
+    {
+        participantCount = 0;
+        if (seatCount == 0 || !_api || !_api->getLocalConnectionID) {
+            return std::nullopt;
+        }
+
+        STRPM::ConnectionID localConnectionID = 0;
+        if (_api->getLocalConnectionID(&localConnectionID) != STRPM::Result::kOk ||
+            localConnectionID == 0) {
+            return std::nullopt;
+        }
+
+        std::vector<STRPM::ConnectionID> participants;
+        {
+            std::scoped_lock lock(_peerMutex);
+            participants.reserve(_observedPeers.size() + 1);
+            participants.push_back(localConnectionID);
+            for (const auto connectionID : _observedPeers) {
+                if (connectionID != 0 && connectionID != localConnectionID) {
+                    participants.push_back(connectionID);
+                }
+            }
+        }
+
+        std::sort(participants.begin(), participants.end());
+        participants.erase(std::unique(participants.begin(), participants.end()), participants.end());
+        participantCount = participants.size();
+
+        const auto localIt = std::lower_bound(participants.begin(), participants.end(), localConnectionID);
+        if (localIt == participants.end() || *localIt != localConnectionID) {
+            return std::nullopt;
+        }
+
+        const auto ordinal = static_cast<std::size_t>(std::distance(participants.begin(), localIt));
+        if (ordinal >= seatCount) {
+            SKSE::log::warn(
+                "CFT SIT no free deterministic slot localConnection={} ordinal={} participants={} seats={}",
+                localConnectionID,
+                ordinal,
+                participantCount,
+                seatCount);
+            return std::nullopt;
+        }
+
+        return ordinal;
+    }
+
     bool STRPMClient::MarkPeerObserved(STRPM::ConnectionID connectionID)
     {
         if (connectionID == 0) {
