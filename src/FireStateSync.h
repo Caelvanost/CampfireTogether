@@ -11,6 +11,7 @@ namespace CampfireTogether
         static FireStateSync& GetSingleton();
 
         void OnCellFullyLoaded(RE::TESObjectCELL* cell);
+        void RefreshTrackedCampfires();
         void TrackCampfireReference(RE::TESObjectREFR* reference);
         void ReportObserved(
             RE::TESObjectREFR* reference,
@@ -96,6 +97,7 @@ namespace CampfireTogether
         std::unordered_map<Key, RE::ObjectRefHandle, KeyHash> _tracked;
         std::unordered_map<Key, std::uint64_t, KeyHash> _appliedRevision;
         std::unordered_map<STRPM::ConnectionID, SnapshotReceiveState> _remoteSnapshots;
+        std::chrono::steady_clock::time_point _lastPlayerCellScan{};
         std::atomic<std::uint64_t> _nextSnapshotID{ 1 };
     };
 }
