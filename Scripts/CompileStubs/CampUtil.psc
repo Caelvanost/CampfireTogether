@@ -29,3 +29,35 @@ EndFunction
 _Camp_Compatibility Function GetCompatibilitySystem() Global
     Return None
 EndFunction
+
+Bool Function GetSKSELoaded() Global
+    Return True
+EndFunction
+
+FallbackEventEmitter Function GetEventEmitter_PlayerHit() Global
+    Return None
+EndFunction
+
+FallbackEventEmitter Function GetEventEmitter_InstinctsStartSearch() Global
+    Return None
+EndFunction
+
+FallbackEventEmitter Function GetEventEmitter_InstinctsStopSearch() Global
+    Return None
+EndFunction
+
+Int Function GetTrackedFollowerCount() Global
+    Return 0
+EndFunction
+
+Actor Function GetTrackedFollower(Int aiIndex) Global
+    Return None
+EndFunction
+
+Int Function GetTrackedAnimalCount() Global
+    Return 0
+EndFunction
+
+Actor Function GetTrackedAnimal() Global
+    Return None
+EndFunction
