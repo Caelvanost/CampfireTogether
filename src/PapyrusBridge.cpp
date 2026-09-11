@@ -4,11 +4,15 @@
 #include "FireStateSync.h"
 #include "LocalBuildIntent.h"
 #include "SharedCampSync.h"
+#include "STRPMClient.h"
 
 namespace CampfireTogether::PapyrusBridge
 {
     namespace
     {
+        std::mutex g_seatAssignmentLogMutex;
+        std::unordered_map<RE::FormID, RE::FormID> g_lastSeatAssignment;
+
         [[nodiscard]] std::uint32_t RequestID(std::int32_t requestID)
         {
             return requestID > 0 ? static_cast<std::uint32_t>(requestID) : 0;
@@ -162,6 +166,125 @@ namespace CampfireTogether::PapyrusBridge
             return FireStateSync::GetSingleton().GetDesiredLight(reference);
         }
 
+        RE::TESObjectREFR* GetAssignedCampfireSeat(
+            RE::StaticFunctionTag*,
+            RE::TESObjectREFR* campfire,
+            RE::TESObjectREFR* seat1,
+            RE::TESObjectREFR* seat2,
+            RE::TESObjectREFR* seat3,
+            RE::TESObjectREFR* seat4)
+        {
+            if (!campfire || !seat2) {
+                return seat2;
+            }
+
+            std::vector<RE::TESObjectREFR*> seats;
+            seats.reserve(4);
+            const auto appendSeat = [&seats](RE::TESObjectREFR* seat) {
+                if (!seat || seat->IsMarkedForDeletion()) {
+                    return;
+                }
+                const auto duplicate = std::find_if(
+                    seats.begin(),
+                    seats.end(),
+                    [seat](const auto* existing) {
+                        return existing == seat || existing->GetFormID() == seat->GetFormID();
+                    });
+                if (duplicate == seats.end()) {
+                    seats.push_back(seat);
+                }
+            };
+
+            appendSeat(seat1);
+            appendSeat(seat2);
+            appendSeat(seat3);
+            appendSeat(seat4);
+
+            if (seats.size() <= 1) {
+                return seat2;
+            }
+
+            std::size_t participantCount = 0;
+            const auto ordinal = STRPMClient::GetSingleton().GetLocalSeatOrdinal(
+                seats.size(),
+                participantCount);
+
+            // Offline / solo play preserves Campfire's vanilla player seat.
+            if (!ordinal || participantCount <= 1) {
+                return seat2;
+            }
+
+            if (participantCount > seats.size()) {
+                SKSE::log::warn(
+                    "CFT SIT insufficient seats camp={:08X} participants={} seats={}",
+                    campfire->GetFormID(),
+                    participantCount,
+                    seats.size());
+                return nullptr;
+            }
+
+            const auto& firePos = campfire->data.location;
+            std::sort(
+                seats.begin(),
+                seats.end(),
+                [&firePos](const auto* lhs, const auto* rhs) {
+                    const auto& leftPos = lhs->data.location;
+                    const auto& rightPos = rhs->data.location;
+                    const auto leftAngle = std::atan2(
+                        static_cast<double>(leftPos.y - firePos.y),
+                        static_cast<double>(leftPos.x - firePos.x));
+                    const auto rightAngle = std::atan2(
+                        static_cast<double>(rightPos.y - firePos.y),
+                        static_cast<double>(rightPos.x - firePos.x));
+                    if (leftAngle != rightAngle) {
+                        return leftAngle < rightAngle;
+                    }
+
+                    const auto leftDX = leftPos.x - firePos.x;
+                    const auto leftDY = leftPos.y - firePos.y;
+                    const auto rightDX = rightPos.x - firePos.x;
+                    const auto rightDY = rightPos.y - firePos.y;
+                    const auto leftRadius = leftDX * leftDX + leftDY * leftDY;
+                    const auto rightRadius = rightDX * rightDX + rightDY * rightDY;
+                    return leftRadius < rightRadius;
+                });
+
+            // Spread fewer players around the whole ring instead of packing them
+            // into adjacent seats. For four seats: 2 players -> slots 0 and 2;
+            // 3 players -> 0, 1 and 3; 4 players -> 0, 1, 2 and 3.
+            const auto numerator = (*ordinal) * seats.size();
+            const auto seatIndex = static_cast<std::size_t>(std::floor(
+                (static_cast<double>(numerator) / static_cast<double>(participantCount)) + 0.5));
+            if (seatIndex >= seats.size()) {
+                return nullptr;
+            }
+
+            auto* selected = seats[seatIndex];
+            if (selected) {
+                bool changed = false;
+                {
+                    std::scoped_lock lock(g_seatAssignmentLogMutex);
+                    const auto [it, inserted] = g_lastSeatAssignment.insert_or_assign(
+                        campfire->GetFormID(),
+                        selected->GetFormID());
+                    changed = inserted || it->second != selected->GetFormID();
+                }
+
+                // insert_or_assign updates before the comparison above, so also log
+                // the first assignment and rely on Papyrus to log actual swaps.
+                if (changed) {
+                    SKSE::log::info(
+                        "CFT SIT assignment camp={:08X} seat={:08X} ordinal={} participants={} seats={}",
+                        campfire->GetFormID(),
+                        selected->GetFormID(),
+                        *ordinal,
+                        participantCount,
+                        seats.size());
+                }
+            }
+            return selected;
+        }
+
         void ReportCampfireState(
             RE::StaticFunctionTag*,
             RE::TESObjectREFR* reference,
@@ -194,7 +317,7 @@ namespace CampfireTogether::PapyrusBridge
 
         void StateBridgeReady(RE::StaticFunctionTag*)
         {
-            SKSE::log::info("CFT PAPYRUS fire-state observer READY poll=2s");
+            SKSE::log::info("CFT PAPYRUS fire-state observer READY poll=2s seatSlots=1");
         }
 
         bool ConsumeLocalCampfirePower(
@@ -265,6 +388,7 @@ namespace CampfireTogether::PapyrusBridge
         vm->RegisterFunction("GetDesiredCampfireFuelLit", "CampfireTogetherNative", GetDesiredCampfireFuelLit);
         vm->RegisterFunction("GetDesiredCampfireFuelUnlit", "CampfireTogetherNative", GetDesiredCampfireFuelUnlit);
         vm->RegisterFunction("GetDesiredCampfireLight", "CampfireTogetherNative", GetDesiredCampfireLight);
+        vm->RegisterFunction("GetAssignedCampfireSeat", "CampfireTogetherNative", GetAssignedCampfireSeat);
         vm->RegisterFunction("ReportCampfireState", "CampfireTogetherNative", ReportCampfireState);
         vm->RegisterFunction("AcknowledgeCampfireState", "CampfireTogetherNative", AcknowledgeCampfireState);
         vm->RegisterFunction("StateBridgeReady", "CampfireTogetherNative", StateBridgeReady);
@@ -276,7 +400,7 @@ namespace CampfireTogether::PapyrusBridge
         vm->RegisterFunction("ReportRemoteBedrollAccess", "CampfireTogetherNative", ReportRemoteBedrollAccess);
         vm->RegisterFunction("BridgeReady", "CampfireTogetherNative", BridgeReady);
 
-        SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative sharedRegistry=1 fireState=1 powerGuard=1");
+        SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative sharedRegistry=1 fireState=1 powerGuard=1 seatSlots=1");
         return true;
     }
 }
