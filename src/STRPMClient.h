@@ -42,6 +42,6 @@ namespace CampfireTogether
         std::mutex _peerMutex;
         std::unordered_set<STRPM::ConnectionID> _observedPeers;
         std::mutex _probeMutex;
-        std::chrono::steady_clock::time_point _lastSuccessfulProbe{};
+        std::chrono::steady_clock::time_point _lastProbeAttempt{};
     };
 }
