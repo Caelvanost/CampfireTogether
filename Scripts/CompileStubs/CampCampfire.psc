@@ -5,6 +5,7 @@ Int Property campfire_size Auto Hidden
 ObjectReference Property myFuelLit Auto Hidden
 ObjectReference Property myFuelUnlit Auto Hidden
 ObjectReference Property myLight Auto Hidden
+GlobalVariable Property _Camp_PerkRank_Resourceful Auto
 
 Float Function GetRemainingDisplayTime()
     Return 0.0
