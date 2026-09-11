@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "PapyrusBridge.h"
 
+#include "FireStateSync.h"
 #include "LocalBuildIntent.h"
 #include "SharedCampSync.h"
 
@@ -110,6 +111,81 @@ namespace CampfireTogether::PapyrusBridge
             SharedCampSync::GetSingleton().FailRemoteMaterialization(RequestID(requestID));
         }
 
+        std::int32_t GetTrackedCampfireCount(RE::StaticFunctionTag*)
+        {
+            return FireStateSync::GetSingleton().GetTrackedCount();
+        }
+
+        RE::TESObjectREFR* GetTrackedCampfire(RE::StaticFunctionTag*, std::int32_t index)
+        {
+            return FireStateSync::GetSingleton().GetTracked(index);
+        }
+
+        bool CampfireStateNeedsApply(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            return FireStateSync::GetSingleton().NeedsApply(reference);
+        }
+
+        std::int32_t GetDesiredCampfireStage(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            return FireStateSync::GetSingleton().GetDesiredStage(reference);
+        }
+
+        std::int32_t GetDesiredCampfireSize(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            return FireStateSync::GetSingleton().GetDesiredSize(reference);
+        }
+
+        float GetDesiredCampfireRemainingHours(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            return FireStateSync::GetSingleton().GetDesiredRemainingHours(reference);
+        }
+
+        RE::TESForm* GetDesiredCampfireFuelLit(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            return FireStateSync::GetSingleton().GetDesiredFuelLit(reference);
+        }
+
+        RE::TESForm* GetDesiredCampfireFuelUnlit(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            return FireStateSync::GetSingleton().GetDesiredFuelUnlit(reference);
+        }
+
+        RE::TESForm* GetDesiredCampfireLight(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            return FireStateSync::GetSingleton().GetDesiredLight(reference);
+        }
+
+        void ReportCampfireState(
+            RE::StaticFunctionTag*,
+            RE::TESObjectREFR* reference,
+            std::int32_t stage,
+            std::int32_t size,
+            float remainingHours,
+            RE::TESForm* fuelLit,
+            RE::TESForm* fuelUnlit,
+            RE::TESForm* light)
+        {
+            FireStateSync::GetSingleton().ReportObserved(
+                reference,
+                stage,
+                size,
+                remainingHours,
+                fuelLit,
+                fuelUnlit,
+                light);
+        }
+
+        void AcknowledgeCampfireState(RE::StaticFunctionTag*, RE::TESObjectREFR* reference)
+        {
+            FireStateSync::GetSingleton().AcknowledgeApplied(reference);
+        }
+
+        void StateBridgeReady(RE::StaticFunctionTag*)
+        {
+            SKSE::log::info("CFT PAPYRUS fire-state observer READY poll=2s");
+        }
+
         bool ConsumeLocalBuildIntent(RE::StaticFunctionTag*)
         {
             return LocalBuildIntent::Consume();
@@ -155,12 +231,26 @@ namespace CampfireTogether::PapyrusBridge
         vm->RegisterFunction("GetRemoteMaterializationAngleZ", "CampfireTogetherNative", GetRemoteMaterializationAngleZ);
         vm->RegisterFunction("ReportRemoteMaterialized", "CampfireTogetherNative", ReportRemoteMaterialized);
         vm->RegisterFunction("ReportRemoteMaterializationFailed", "CampfireTogetherNative", ReportRemoteMaterializationFailed);
+
+        vm->RegisterFunction("GetTrackedCampfireCount", "CampfireTogetherNative", GetTrackedCampfireCount);
+        vm->RegisterFunction("GetTrackedCampfire", "CampfireTogetherNative", GetTrackedCampfire);
+        vm->RegisterFunction("CampfireStateNeedsApply", "CampfireTogetherNative", CampfireStateNeedsApply);
+        vm->RegisterFunction("GetDesiredCampfireStage", "CampfireTogetherNative", GetDesiredCampfireStage);
+        vm->RegisterFunction("GetDesiredCampfireSize", "CampfireTogetherNative", GetDesiredCampfireSize);
+        vm->RegisterFunction("GetDesiredCampfireRemainingHours", "CampfireTogetherNative", GetDesiredCampfireRemainingHours);
+        vm->RegisterFunction("GetDesiredCampfireFuelLit", "CampfireTogetherNative", GetDesiredCampfireFuelLit);
+        vm->RegisterFunction("GetDesiredCampfireFuelUnlit", "CampfireTogetherNative", GetDesiredCampfireFuelUnlit);
+        vm->RegisterFunction("GetDesiredCampfireLight", "CampfireTogetherNative", GetDesiredCampfireLight);
+        vm->RegisterFunction("ReportCampfireState", "CampfireTogetherNative", ReportCampfireState);
+        vm->RegisterFunction("AcknowledgeCampfireState", "CampfireTogetherNative", AcknowledgeCampfireState);
+        vm->RegisterFunction("StateBridgeReady", "CampfireTogetherNative", StateBridgeReady);
+
         vm->RegisterFunction("ConsumeLocalBuildIntent", "CampfireTogetherNative", ConsumeLocalBuildIntent);
         vm->RegisterFunction("ReportRemoteBuildSuppressed", "CampfireTogetherNative", ReportRemoteBuildSuppressed);
         vm->RegisterFunction("ReportRemoteBedrollAccess", "CampfireTogetherNative", ReportRemoteBedrollAccess);
         vm->RegisterFunction("BridgeReady", "CampfireTogetherNative", BridgeReady);
 
-        SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative sharedRegistry=1");
+        SKSE::log::info("CFT PAPYRUS native bridge READY class=CampfireTogetherNative sharedRegistry=1 fireState=1");
         return true;
     }
 }
