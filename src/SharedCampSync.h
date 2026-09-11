@@ -39,8 +39,17 @@ namespace CampfireTogether
 
         [[nodiscard]] bool IsRemoteCampObject(RE::TESObjectREFR* reference) const;
 
+        // Stable shared-object identity access used by the v0.4 runtime-state layer.
+        [[nodiscard]] bool TryGetCampKey(
+            RE::TESObjectREFR* reference,
+            std::uint64_t& originNodeID,
+            std::uint64_t& objectID,
+            bool& isTent) const;
+        [[nodiscard]] bool IsCampActive(std::uint64_t originNodeID, std::uint64_t objectID) const;
+        [[nodiscard]] std::uint64_t GetLocalNodeID();
+
         // Compatibility stubs for the short-lived v0.2.8 Papyrus materialization bridge.
-        // v0.3.0 materializes directly from actual TESCellFullyLoadedEvent cells.
+        // v0.3.0+ materializes directly from actual TESCellFullyLoadedEvent cells.
         [[nodiscard]] bool IsRemoteMaterializationRequestValid(std::uint32_t) const { return false; }
         [[nodiscard]] float GetRemoteMaterializationX(std::uint32_t) const { return 0.0f; }
         [[nodiscard]] float GetRemoteMaterializationY(std::uint32_t) const { return 0.0f; }
