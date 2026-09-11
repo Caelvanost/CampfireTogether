@@ -33,7 +33,7 @@ EndFunction
 Function ReportObservedState(ObjectReference ref, CampCampfire fire)
     Form fuelLit = None
     Form fuelUnlit = None
-    Form light = None
+    Form lightForm = None
 
     If fire.myFuelLit
         fuelLit = fire.myFuelLit.GetBaseObject()
@@ -42,10 +42,10 @@ Function ReportObservedState(ObjectReference ref, CampCampfire fire)
         fuelUnlit = fire.myFuelUnlit.GetBaseObject()
     EndIf
     If fire.myLight
-        light = fire.myLight.GetBaseObject()
+        lightForm = fire.myLight.GetBaseObject()
     EndIf
 
-    CampfireTogetherNative.ReportCampfireState(ref, fire.campfire_stage, fire.campfire_size, fire.GetRemainingDisplayTime(), fuelLit, fuelUnlit, light)
+    CampfireTogetherNative.ReportCampfireState(ref, fire.campfire_stage, fire.campfire_size, fire.GetRemainingDisplayTime(), fuelLit, fuelUnlit, lightForm)
 EndFunction
 
 Function ApplyAuthoritativeState(ObjectReference ref, CampCampfire fire)
