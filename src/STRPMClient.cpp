@@ -170,10 +170,11 @@ namespace CampfireTogether
                 (packet.flags & Protocol::kDeleted) ? 1 : 0);
         } else {
             SKSE::log::info(
-                "CFT STRPM TX target={} type={} snapshot={}",
+                "CFT STRPM TX target={} type={} snapshot={} node={:016X}",
                 target.connectionID,
                 static_cast<unsigned>(packet.type),
-                packet.snapshotID);
+                packet.snapshotID,
+                packet.writerNodeID);
         }
         return true;
     }
@@ -197,6 +198,7 @@ namespace CampfireTogether
         Protocol::Packet packet{};
         packet.type = Protocol::PacketType::kSnapshotRequest;
         packet.snapshotID = _nextSnapshotRequestID.fetch_add(1);
+        packet.writerNodeID = SharedCampSync::GetSingleton().GetLocalNodeID();
         return packet;
     }
 
@@ -208,7 +210,10 @@ namespace CampfireTogether
 
         auto packet = MakeSnapshotRequest();
         if (Send(packet)) {
-            SKSE::log::info("CFT SHARED SNAPSHOT REQUEST broadcast request={}", packet.snapshotID);
+            SKSE::log::info(
+                "CFT SHARED SNAPSHOT REQUEST broadcast request={} node={:016X}",
+                packet.snapshotID,
+                packet.writerNodeID);
         }
     }
 
@@ -221,9 +226,10 @@ namespace CampfireTogether
         auto packet = MakeSnapshotRequest();
         if (SendTo(connectionID, packet)) {
             SKSE::log::info(
-                "CFT SHARED SNAPSHOT REQUEST targeted connection={} request={}",
+                "CFT SHARED SNAPSHOT REQUEST targeted connection={} request={} node={:016X}",
                 connectionID,
-                packet.snapshotID);
+                packet.snapshotID,
+                packet.writerNodeID);
         }
     }
 
@@ -255,8 +261,9 @@ namespace CampfireTogether
         }
 
         SKSE::log::info(
-            "CFT STRPM BOOTSTRAP connected localConnection={} request={} trigger=cell-load",
+            "CFT STRPM BOOTSTRAP connected localConnection={} node={:016X} request={} trigger=cell-load",
             localConnectionID,
+            packet.writerNodeID,
             packet.snapshotID);
     }
 
@@ -265,24 +272,24 @@ namespace CampfireTogether
         std::size_t& participantCount)
     {
         participantCount = 0;
-        if (seatCount == 0 || !_api || !_api->getLocalConnectionID) {
+        if (seatCount == 0) {
             return std::nullopt;
         }
 
-        STRPM::ConnectionID localConnectionID = 0;
-        if (_api->getLocalConnectionID(&localConnectionID) != STRPM::Result::kOk ||
-            localConnectionID == 0) {
+        const auto localNodeID = SharedCampSync::GetSingleton().GetLocalNodeID();
+        if (localNodeID == 0) {
             return std::nullopt;
         }
 
-        std::vector<STRPM::ConnectionID> participants;
+        std::vector<std::uint64_t> participants;
         {
             std::scoped_lock lock(_peerMutex);
-            participants.reserve(_observedPeers.size() + 1);
-            participants.push_back(localConnectionID);
-            for (const auto connectionID : _observedPeers) {
-                if (connectionID != 0 && connectionID != localConnectionID) {
-                    participants.push_back(connectionID);
+            participants.reserve(_peerNodeIDs.size() + 1);
+            participants.push_back(localNodeID);
+            for (const auto& [connectionID, nodeID] : _peerNodeIDs) {
+                (void)connectionID;
+                if (nodeID != 0 && nodeID != localNodeID) {
+                    participants.push_back(nodeID);
                 }
             }
         }
@@ -291,16 +298,16 @@ namespace CampfireTogether
         participants.erase(std::unique(participants.begin(), participants.end()), participants.end());
         participantCount = participants.size();
 
-        const auto localIt = std::lower_bound(participants.begin(), participants.end(), localConnectionID);
-        if (localIt == participants.end() || *localIt != localConnectionID) {
+        const auto localIt = std::lower_bound(participants.begin(), participants.end(), localNodeID);
+        if (localIt == participants.end() || *localIt != localNodeID) {
             return std::nullopt;
         }
 
         const auto ordinal = static_cast<std::size_t>(std::distance(participants.begin(), localIt));
         if (ordinal >= seatCount) {
             SKSE::log::warn(
-                "CFT SIT no free deterministic slot localConnection={} ordinal={} participants={} seats={}",
-                localConnectionID,
+                "CFT SIT no free deterministic slot localNode={:016X} ordinal={} participants={} seats={}",
+                localNodeID,
                 ordinal,
                 participantCount,
                 seatCount);
@@ -319,6 +326,38 @@ namespace CampfireTogether
         return _observedPeers.insert(connectionID).second;
     }
 
+    void STRPMClient::MarkPeerNodeIdentity(
+        STRPM::ConnectionID connectionID,
+        std::uint64_t nodeID)
+    {
+        if (connectionID == 0 || nodeID == 0) {
+            return;
+        }
+
+        bool changed = false;
+        std::uint64_t previous = 0;
+        {
+            std::scoped_lock lock(_peerMutex);
+            const auto it = _peerNodeIDs.find(connectionID);
+            if (it == _peerNodeIDs.end()) {
+                _peerNodeIDs.emplace(connectionID, nodeID);
+                changed = true;
+            } else if (it->second != nodeID) {
+                previous = it->second;
+                it->second = nodeID;
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            SKSE::log::info(
+                "CFT STRPM PEER identity connection={} node={:016X} previous={:016X}",
+                connectionID,
+                nodeID,
+                previous);
+        }
+    }
+
     void STRPMClient::ForgetPeer(STRPM::ConnectionID connectionID)
     {
         if (connectionID == 0) {
@@ -326,12 +365,14 @@ namespace CampfireTogether
         }
         std::scoped_lock lock(_peerMutex);
         _observedPeers.erase(connectionID);
+        _peerNodeIDs.erase(connectionID);
     }
 
     void STRPMClient::ForgetAllPeers()
     {
         std::scoped_lock lock(_peerMutex);
         _observedPeers.clear();
+        _peerNodeIDs.clear();
     }
 
     void STRPM_CALL STRPMClient::OnMessage(const STRPM::Message* message, void* userData)
@@ -437,6 +478,9 @@ namespace CampfireTogether
 
         const auto connectionID = message.sender.connectionID;
         const bool firstObservedPacket = MarkPeerObserved(connectionID);
+        if (Protocol::IsControlPacket(packet) && packet.writerNodeID != 0) {
+            MarkPeerNodeIdentity(connectionID, packet.writerNodeID);
+        }
 
         if (Protocol::IsObjectPacket(packet)) {
             SKSE::log::info(
@@ -455,10 +499,11 @@ namespace CampfireTogether
                 (packet.flags & Protocol::kDeleted) ? 1 : 0);
         } else {
             SKSE::log::info(
-                "CFT STRPM RX connection={} type={} snapshot={}",
+                "CFT STRPM RX connection={} type={} snapshot={} node={:016X}",
                 connectionID,
                 static_cast<unsigned>(packet.type),
-                packet.snapshotID);
+                packet.snapshotID,
+                packet.writerNodeID);
         }
 
         auto dispatch = [connectionID, packet, firstObservedPacket]() {
