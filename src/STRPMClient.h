@@ -22,9 +22,9 @@ namespace CampfireTogether
         void RequestSnapshot(STRPM::ConnectionID connectionID);
         void ProbeStateExchange();
 
-        // Returns this client's deterministic rank among currently observed STR
-        // connections. All peers sort the same global connection IDs, so the
-        // rank can safely drive local-only furniture-slot selection.
+        // Returns this client's deterministic rank among currently observed CFT
+        // nodes. STRPM connection IDs are endpoint-local and therefore cannot be
+        // compared across machines; persistent CFT node IDs can.
         [[nodiscard]] std::optional<std::size_t> GetLocalSeatOrdinal(
             std::size_t seatCount,
             std::size_t& participantCount);
@@ -38,6 +38,7 @@ namespace CampfireTogether
         [[nodiscard]] bool SendImpl(STRPM::Target target, const Protocol::Packet& packet) const;
         [[nodiscard]] Protocol::Packet MakeSnapshotRequest();
         [[nodiscard]] bool MarkPeerObserved(STRPM::ConnectionID connectionID);
+        void MarkPeerNodeIdentity(STRPM::ConnectionID connectionID, std::uint64_t nodeID);
         void ForgetPeer(STRPM::ConnectionID connectionID);
         void ForgetAllPeers();
 
@@ -48,6 +49,7 @@ namespace CampfireTogether
         std::atomic<std::uint64_t> _nextSnapshotRequestID{ 1 };
         std::mutex _peerMutex;
         std::unordered_set<STRPM::ConnectionID> _observedPeers;
+        std::unordered_map<STRPM::ConnectionID, std::uint64_t> _peerNodeIDs;
         std::mutex _probeMutex;
         std::chrono::steady_clock::time_point _lastProbeAttempt{};
     };
