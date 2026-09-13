@@ -8,6 +8,9 @@ namespace CampfireTogether
 {
     namespace
     {
+        constexpr float kTimerRefreshEpsilonHours = 0.001f;
+        constexpr float kTimerMutationIncreaseHours = 0.15f;
+
         [[nodiscard]] FireStateProtocol::Packet MakeControlPacket(
             FireStateProtocol::PacketType type,
             std::uint64_t snapshotID)
@@ -105,10 +108,24 @@ namespace CampfireTogether
                     incoming.revision > current.revision ||
                     (incoming.revision == current.revision &&
                      incoming.writerNodeID > current.writerNodeID);
-                if (newer) {
+                const bool sameWriterTimerRefresh =
+                    fromNetwork &&
+                    incoming.revision == current.revision &&
+                    incoming.writerNodeID == current.writerNodeID &&
+                    std::abs(incoming.remainingHours - current.remainingHours) >
+                        kTimerRefreshEpsilonHours;
+
+                // STRPM state traffic is reliable + ordered. A packet from the
+                // same writer at the same revision is therefore a newer passive
+                // timer heartbeat, not a conflicting logical state.
+                if (newer || sameWriterTimerRefresh) {
                     it->second = incoming;
                     changed = true;
                 }
+            }
+
+            if (changed && fromNetwork) {
+                _pendingApply.insert(incoming.key);
             }
         }
 
@@ -146,6 +163,7 @@ namespace CampfireTogether
                     it->first.originNodeID,
                     it->first.objectID)) {
                 _appliedRevision.erase(it->first);
+                _pendingApply.erase(it->first);
                 it = _tracked.erase(it);
             } else {
                 ++it;
@@ -219,6 +237,7 @@ namespace CampfireTogether
 
         const auto localNodeID = SharedCampSync::GetSingleton().GetLocalNodeID();
         bool broadcast = false;
+        bool timerMutation = false;
         State outgoing{};
         {
             std::scoped_lock lock(_mutex);
@@ -231,13 +250,24 @@ namespace CampfireTogether
                 outgoing = observed;
                 broadcast = true;
             } else {
+                // Do not classify the old local state as a player interaction while
+                // a remote revision or same-revision timer heartbeat is waiting to
+                // be applied by the Papyrus bridge.
+                if (_pendingApply.contains(*key)) {
+                    return;
+                }
+
                 const auto appliedIt = _appliedRevision.find(*key);
                 const auto appliedRevision = appliedIt != _appliedRevision.end() ? appliedIt->second : 0;
                 if (appliedRevision < currentIt->second.revision) {
                     return;
                 }
 
-                if (MeaningfullyDifferent(currentIt->second, observed)) {
+                timerMutation =
+                    observed.remainingHours >
+                    currentIt->second.remainingHours + kTimerMutationIncreaseHours;
+
+                if (MeaningfullyDifferent(currentIt->second, observed) || timerMutation) {
                     observed.revision = currentIt->second.revision + 1;
                     observed.writerNodeID = localNodeID;
                     currentIt->second = observed;
@@ -245,9 +275,10 @@ namespace CampfireTogether
                     outgoing = observed;
                     broadcast = true;
                 } else {
-                    // Timer drift alone is not a network revision. Keep the latest
-                    // observed value locally so a future state transition carries a
-                    // useful resume point without creating ping-pong between clients.
+                    // Passive countdown is not a logical network revision. The
+                    // writer periodically rebroadcasts this latest observed value;
+                    // non-writers keep it only as the baseline used to detect a
+                    // real local timer increase such as Replenish Fuel.
                     currentIt->second.remainingHours = remainingHours;
                 }
             }
@@ -255,13 +286,15 @@ namespace CampfireTogether
 
         if (broadcast) {
             SKSE::log::info(
-                "CFT FIRE LOCAL CHANGE object={:016X}:{} rev={} stage={} size={} remaining={:.2f}",
+                "CFT FIRE LOCAL CHANGE object={:016X}:{} rev={} writer={:016X} stage={} size={} remaining={:.2f} reason={}",
                 outgoing.key.originNodeID,
                 outgoing.key.objectID,
                 outgoing.revision,
+                outgoing.writerNodeID,
                 outgoing.stage,
                 outgoing.size,
-                outgoing.remainingHours);
+                outgoing.remainingHours,
+                timerMutation ? "timer-increase" : "state");
             BroadcastState(outgoing);
         }
     }
@@ -332,6 +365,9 @@ namespace CampfireTogether
         if (stateIt == _states.end()) {
             return false;
         }
+        if (_pendingApply.contains(*key)) {
+            return true;
+        }
         const auto appliedIt = _appliedRevision.find(*key);
         const auto applied = appliedIt != _appliedRevision.end() ? appliedIt->second : 0;
         return applied < stateIt->second.revision;
@@ -383,11 +419,13 @@ namespace CampfireTogether
         const auto stateIt = _states.find(*key);
         if (stateIt != _states.end()) {
             _appliedRevision.insert_or_assign(*key, stateIt->second.revision);
+            _pendingApply.erase(*key);
             SKSE::log::info(
-                "CFT FIRE APPLY ACK object={:016X}:{} rev={}",
+                "CFT FIRE APPLY ACK object={:016X}:{} rev={} remaining={:.2f}",
                 key->originNodeID,
                 key->objectID,
-                stateIt->second.revision);
+                stateIt->second.revision,
+                stateIt->second.remainingHours);
         }
     }
 
@@ -533,6 +571,7 @@ namespace CampfireTogether
         std::scoped_lock lock(_mutex);
         _tracked.clear();
         _appliedRevision.clear();
+        _pendingApply.clear();
         _remoteSnapshots.clear();
     }
 
@@ -542,6 +581,7 @@ namespace CampfireTogether
         _states.clear();
         _tracked.clear();
         _appliedRevision.clear();
+        _pendingApply.clear();
         _remoteSnapshots.clear();
         _nextSnapshotID.store(1);
         SKSE::log::info("CFT FIRE STATE cleared");

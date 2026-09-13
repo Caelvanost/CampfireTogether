@@ -41,11 +41,10 @@ namespace CampfireTogether
             }
         }
 
-        // A campfire may be observed before Skyrim Together's transport is fully
-        // connected. Its initial revision remains in the local registry, so retry
-        // the latest state of currently tracked fires periodically. Duplicate
-        // revisions are ignored by Merge(), while a late peer can finally receive
-        // the authoritative state once the transport is available.
+        // The current writer is authoritative for passive timer progression.
+        // A different player may become writer after a real local interaction
+        // (for example Replenish Fuel), but non-writers must never echo their
+        // local timer estimate back onto the network.
         static auto lastStateRebroadcast = std::chrono::steady_clock::time_point{};
         if (lastStateRebroadcast.time_since_epoch().count() != 0 &&
             now - lastStateRebroadcast < kStateRebroadcastCooldown) {
@@ -53,6 +52,7 @@ namespace CampfireTogether
         }
         lastStateRebroadcast = now;
 
+        const auto localNodeID = SharedCampSync::GetSingleton().GetLocalNodeID();
         std::vector<State> retryStates;
         {
             std::scoped_lock lock(_mutex);
@@ -62,7 +62,8 @@ namespace CampfireTogether
                 if (!reference || reference->IsMarkedForDeletion()) {
                     continue;
                 }
-                if (const auto stateIt = _states.find(key); stateIt != _states.end()) {
+                if (const auto stateIt = _states.find(key);
+                    stateIt != _states.end() && stateIt->second.writerNodeID == localNodeID) {
                     retryStates.push_back(stateIt->second);
                 }
             }
@@ -76,10 +77,11 @@ namespace CampfireTogether
             }
 
             SKSE::log::debug(
-                "CFT FIRE RETRY object={:016X}:{} rev={} remaining={:.2f}",
+                "CFT FIRE RETRY object={:016X}:{} rev={} writer={:016X} remaining={:.2f}",
                 state.key.originNodeID,
                 state.key.objectID,
                 state.revision,
+                state.writerNodeID,
                 state.remainingHours);
             BroadcastState(state);
         }

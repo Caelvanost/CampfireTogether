@@ -87,6 +87,47 @@ Float Function GetFullFuelHours(CampCampfire fire)
     Return baseHours * GetResourcefulMultiplier(fire)
 EndFunction
 
+Float Function GetAbsoluteDelta(Float a, Float b)
+    Float delta = a - b
+    If delta < 0.0
+        delta = 0.0 - delta
+    EndIf
+    Return delta
+EndFunction
+
+Function SetFuelClosestDuration(CampCampfire fire, Activator fuelLit, Activator fuelUnlit, Light lightForm, Float desiredRemaining)
+    If desiredRemaining < 0.0
+        desiredRemaining = 0.0
+    EndIf
+
+    ; Campfire's SetFuel accepts only an integer base duration, then multiplies it
+    ; by 1 + (ResourcefulRank * 0.25). Temporarily choosing a synthetic rank lets us
+    ; reconstruct the synchronized duration at 15-minute resolution instead of
+    ; rounding to a whole hour. The real perk rank is restored immediately.
+    If fire._Camp_PerkRank_Resourceful
+        Int originalRank = fire._Camp_PerkRank_Resourceful.GetValueInt()
+        Float targetQuarterHours = Math.Floor((desiredRemaining * 4.0) + 0.5) / 4.0
+        If targetQuarterHours < 0.25
+            targetQuarterHours = 0.25
+        EndIf
+
+        Int syntheticRank = Math.Floor(((targetQuarterHours - 1.0) * 4.0) + 0.5)
+        If syntheticRank < -3
+            syntheticRank = -3
+        EndIf
+
+        fire._Camp_PerkRank_Resourceful.SetValueInt(syntheticRank)
+        fire.SetFuel(fuelLit, fuelUnlit, lightForm, 1, true)
+        fire._Camp_PerkRank_Resourceful.SetValueInt(originalRank)
+    Else
+        Int fallbackHours = Math.Floor(desiredRemaining + 0.5)
+        If fallbackHours < 1
+            fallbackHours = 1
+        EndIf
+        fire.SetFuel(fuelLit, fuelUnlit, lightForm, fallbackHours, true)
+    EndIf
+EndFunction
+
 Function ReportObservedState(ObjectReference ref, CampCampfire fire)
     Form fuelLit = None
     Form fuelUnlit = None
@@ -151,24 +192,33 @@ Function ApplyAuthoritativeState(ObjectReference ref, CampCampfire fire)
         EndIf
     EndIf
 
-    Float localMultiplier = GetResourcefulMultiplier(fire)
-    If localMultiplier <= 0.0
-        localMultiplier = 1.0
+    Float localRemaining = fire.GetRemainingDisplayTime()
+    If localRemaining < 0.0
+        localRemaining = 0.0
     EndIf
-
-    Int burnHours = Math.Floor((desiredRemaining / localMultiplier) + 0.5)
-    If burnHours < 1
-        burnHours = 1
-    EndIf
+    Float timerDelta = GetAbsoluteDelta(localRemaining, desiredRemaining)
 
     If desiredStage == 2 && desiredFuelLit && desiredFuelUnlit && desiredLight
-        ; Always rebuild the fuel when applying a remote burning state. Calling
-        ; LightFire() alone reuses this client's stale private burn_duration and
-        ; caused cases such as 5h45 on P1 becoming 0h45 on P2.
-        fire.campfire_stage = 2
-        fire.campfire_size = desiredSize
-        fire.SetFuel(desiredFuelLit, desiredFuelUnlit, desiredLight, burnHours, true)
+        Bool structuralMismatch = fuelMismatch || fire.campfire_stage != 2 || fire.campfire_size != desiredSize
+        Bool timerCorrectionNeeded = timerDelta > 0.14
+
+        ; Rebuild only when the fire structure changed or when timer drift exceeds
+        ; about eight minutes. Same-revision heartbeats no longer recreate fuel
+        ; objects every ten seconds.
+        If structuralMismatch || timerCorrectionNeeded
+            fire.campfire_stage = 2
+            fire.campfire_size = desiredSize
+            SetFuelClosestDuration(fire, desiredFuelLit, desiredFuelUnlit, desiredLight, desiredRemaining)
+        EndIf
     ElseIf fuelMismatch
+        Float localMultiplier = GetResourcefulMultiplier(fire)
+        If localMultiplier <= 0.0
+            localMultiplier = 1.0
+        EndIf
+        Int burnHours = Math.Floor((desiredRemaining / localMultiplier) + 0.5)
+        If burnHours < 1
+            burnHours = 1
+        EndIf
         fire.campfire_stage = desiredStage
         fire.campfire_size = desiredSize
         fire.SetFuel(desiredFuelLit, desiredFuelUnlit, desiredLight, burnHours, true)
